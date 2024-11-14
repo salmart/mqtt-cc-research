@@ -17,7 +17,6 @@ struct mqttcc_db{
     sqlite3_stmt *update_latency_req_max_allowed; // UPDATE subscriptions SET latency_req = ?1, max_allowed_latency = ?2 WHERE topic = ?3
     sqlite3_stmt *find_existing_topic; // SELECT * FROM subscriptions WHERE topic = ?1
     sqlite3_stmt *insert_data_into_topic;//UPDATES the values of the given subscription accordingly 
-
 };
 
 #endif
