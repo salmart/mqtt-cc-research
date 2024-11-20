@@ -191,13 +191,3 @@ class Database:
     def findChangedLatencyTopics(self):
         selectQuery = '''SELECT subscription FROM subscriptions WHERE lat_change = 1'''
         return self.execute_query_with_retry(query=selectQuery)
-    
-    # Sala added this chlaked function
-    def getAllSubscriptionsWithLatency(self):
-        selectQuery = '''SELECT subscription, max_allowed_latency FROM subscriptions'''
-        results = self.execute_query_with_retry(query=selectQuery)
-    
-    # Create a dictionary from the results
-        subscription_latency_dict = {row[0]: row[1] for row in results}
-    
-        return subscription_latency_dict

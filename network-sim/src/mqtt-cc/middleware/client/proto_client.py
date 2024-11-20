@@ -49,12 +49,13 @@ import status_handler
     # 1         2           3           4                   5           6  -> ...
 
     #It looks like this takes 6 args
+    # these six arguments are parameters for publisher?
 def main():
     utils = ProtoUtils()
     current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     devicesFile = sys.argv[1]
     in_sim = sys.argv[2]
-    restart_window = sys.argv[3] # this is 10
+    restart_window = sys.argv[3]
     energy_per_execution = sys.argv[4]
     comm_energy = sys.argv[5]
     threshold = sys.argv[6]
@@ -82,7 +83,6 @@ def main():
         status_handler.logPublisherMetrics(time=current_time, mac=mac, battery=startBattery, memory_util_perc="None", cpu_util_perc="None", cpu_temp="None")
         topicList = rows[i][5:len(rows[i])] # rest of rows are the topics
         for topic in topicList:
-            print("Sala this is topic: ", topic)
             database.addDeviceTopicCapability(MAC_ADDR=mac, TOPIC=topic)
     database.closeDB()
     # create it once

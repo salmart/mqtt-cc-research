@@ -62,7 +62,6 @@ class AsyncMqtt:
 
     async def sendCommandToDevice(self, topic, msg):
         self.client.publish(topic, msg, qos=1)
-        print(f"SALA MESSAGE IS: {msg}")
         print(f"sent to topic {topic}")
 
     async def sendCommands(self, mapAssignments:dict):
@@ -144,10 +143,9 @@ class AsyncMqtt:
         return command 
     
 
-    # Assumption, subscribers don't leave the simulation, only are added 
-    #this only looks for change in database for topics
+    # Assumption, subscribers don't leave the simulation, only are added
     async def lookForChange(self):
-        database = db.Database()
+        database = db.Database() #takes in the database context.
         while True:
             await asyncio.sleep(180)    
             print("opening database")
@@ -155,9 +153,7 @@ class AsyncMqtt:
             mapAssignments = None
             print(self.got_message)
             changedLatencyTopics = database.findChangedLatencyTopics()
-            newTopics = database.findAddedTopics()#sala this is where the new topics that the subscribers have added get put  
-            # The result is a list of tuples; each tuple contains a single string representing a subscription where the added column is set to 1.
-            # into this variable so they can get assigned to a publisher.
+            newTopics = database.findAddedTopics()
             if len(changedLatencyTopics) > 0 or len(newTopics) > 0:
                 print(changedLatencyTopics)
                 print(newTopics)
@@ -166,9 +162,8 @@ class AsyncMqtt:
                     update_list += changedLatencyTopics
                 if newTopics: 
                     update_list += newTopics
-                    #sala this is chalked code btw
                 print(update_list)
-                database.resetAddedAndChangedLatencyTopics(update_list)#this just makes the new topics added field set to 0 aka not new anymore
+                database.resetAddedAndChangedLatencyTopics(update_list)
                 mapAssignments = algo.generateAssignments()
             else:
                 algo.resetPublishingsAndDeviceExecutions()
@@ -192,23 +187,20 @@ class AsyncMqtt:
         self.client.on_disconnect = self.on_disconnect
         self.got_message = None
         self.continue_next_msg = threading.Event()
-        # set other necessary parameters for the client
+        # set other necessary parameters for the client aka middleware
 
         #self.client.username_pw_set(username=utils._USERNAME, password=utils._PASSWORD)
 
         aioh = AsyncioHelper(self.loop, self.client)
 
-        self.client.connect("localhost", 1885, keepalive=1000)
+        self.client.connect("localhost", 1885, keepalive=1000)# here is where it connects to the broker sala
 
         self.client.socket().setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2048)
 
         while True: #infinite loop
             self.got_message = self.loop.create_future()
-            print("Sala we are before the look for change")
-            wait_for_cmd_routine = asyncio.ensure_future(self.lookForChange())#This function does 
-            print("Sala we are after the look for change")
-            wait_for_window_routine = asyncio.create_task(self.waitForTimeWindow())#makes waitfortimewindow a task
-                                                #list of coroutines passed in to execute,      it returns when the first task is complete or exceptions first
+            wait_for_cmd_routine = asyncio.ensure_future(self.lookForChange())#coroutine
+            wait_for_window_routine = asyncio.create_task(self.waitForTimeWindow())
             done, pending = await asyncio.wait([wait_for_cmd_routine, wait_for_window_routine], return_when=asyncio.FIRST_COMPLETED)
             if wait_for_cmd_routine in done:
                 result = wait_for_cmd_routine.result()
@@ -239,10 +231,10 @@ class AsyncMqtt:
             self.got_message = None
             print("end of loop")
 
-def run_async_client(): #aka middleware
+def run_async_client():
     print("Starting")
     loop = asyncio.get_event_loop()
-    loop.run_until_complete(AsyncMqtt(loop).main())
+    loop.run_until_complete(AsyncMqtt(loop).main())#Event loop is executed on the main thread's event loop.
     loop.close()
     print("Finished")
 
