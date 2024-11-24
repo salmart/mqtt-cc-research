@@ -133,8 +133,9 @@ class Database:
 
         
     def addDevice(self, MAC_ADDR, BATTERY):
-        insertQuery = '''INSERT INTO devices (deviceMac, battery, executions, consumption) VALUES (?,?,?,?)'''
-        device_values = (MAC_ADDR, BATTERY, 0, 0)
+        insertQuery = '''INSERT OR REPLACE INTO devices (deviceMac, battery, executions, consumption) VALUES (?, ?, ?, ?) '''
+    # Replace existing row or insert a new one
+        device_values = (MAC_ADDR, BATTERY, 0, 0)  # executions and consumption default to 0
         self.execute_query_with_retry(query=insertQuery, values=device_values, requires_commit=True)
 
     def addDeviceTopicCapability(self, MAC_ADDR, TOPIC):
@@ -191,13 +192,3 @@ class Database:
     def findChangedLatencyTopics(self):
         selectQuery = '''SELECT subscription FROM subscriptions WHERE lat_change = 1'''
         return self.execute_query_with_retry(query=selectQuery)
-    
-    # Sala added this chlaked function
-    def getAllSubscriptionsWithLatency(self):
-        selectQuery = '''SELECT subscription, max_allowed_latency FROM subscriptions'''
-        results = self.execute_query_with_retry(query=selectQuery)
-    
-    # Create a dictionary from the results
-        subscription_latency_dict = {row[0]: row[1] for row in results}
-    
-        return subscription_latency_dict

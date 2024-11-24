@@ -10,91 +10,126 @@ def resetPublishingsAndDeviceExecutions():
     db.resetDeviceExecutions()
     db.resetDeviceConsumptions()
     db.closeDB()
-#sala chalked code
-def generateAssignments():
+
+def generateAssignments(changedTopic = None, subLeft = None):
     db = Database()
     db.openDB()
-
-    # Step 1: Retrieve all subscriptions and their latency requirements
-    subscriptions_query = '''
-        SELECT DISTINCT subscription, max_allowed_latency
-        FROM subscriptions
-        '''
-    subscriptions = db.execute_query_with_retry(query=subscriptions_query)
-    # subscriptions example: [("sensor/temperature", 200), ("sensor/humidity", 300)]
-
-    # Step 2: Retrieve all devices already publishing and their topics
-    devices_query = '''
-        SELECT deviceMac, topic FROM publish
-        '''
-    devices_publishing = db.execute_query_with_retry(query=devices_query)
-    # devices_publishing example: [("00:11:22:33:44:55", "sensor/temperature")]
-
-    # Step 3: Map subscriptions to their latency requirements
-    subscription_latency_map = {row[0]: row[1] for row in subscriptions}
-
-    # Step 4: Identify topics that need publishers
-    topics_with_no_publishers_query = '''
-        SELECT DISTINCT subscription, max_allowed_latency
-        FROM publish
-        LEFT JOIN subscriptions ON subscription = topic
-        WHERE NOT EXISTS (
-            SELECT 1 FROM publish
-            WHERE subscription = topic AND publishing = 1
-        )
-    '''
-    topics_with_no_publishers = db.execute_query_with_retry(query=topics_with_no_publishers_query)
-    # topics_with_no_publishers example: [("sensor/pressure", 150)]
-
-    # Step 5: Assign topics to devices
-    assignments = []
-    for topic, latency in topics_with_no_publishers:
-        # Get devices capable of publishing to this topic
-        capable_devices_query = '''
-            SELECT deviceMac, capacity, executions, consumption
-            FROM devices
-            WHERE capabilities LIKE ?
-        '''
-        capable_devices = db.execute_query_with_retry(query=capable_devices_query, values=(f"%{topic}%",))
-
-        # Select the first available capable device
-        for device in capable_devices:
-            mac, capacity, executions, consumption = device
-            assignments.append({
-                "deviceMac": mac,
-                "topic": topic,
-                "latency": latency
-            })
-            # Once a device is assigned, break out of the loop
-            break
-
-    # Update database and devices with assignments
+    bestMacNumTopics = 0
+    if changedTopic:
+        db.resetDevicesPublishingToTopic(changedTopic)
+        # if there was a change in a topic's max_allowed_latency,
+        # find all the devices that currently publish to the topic and set publishing = 0
+        # then run algorithm exactly the same as it will be treated like it was just added to the DB
+    elif subLeft:
+        db.resetAllDevicesPublishing()
     publishers = Devices()
-    for assignment in assignments:
-        mac = assignment["deviceMac"]
-        topic = assignment["topic"]
-        latency = assignment["latency"]
 
-        # Add the processing unit for the device
-        if mac not in publishers._units:
-            publishers.addProcessingUnit(Processing_Unit(
-                macAddr=mac,
-                capacity=None,  # Retrieve from DB or logic
-                executions=None,
-                consumption=None
-            ))
+    bestMac = None
+    Emin = None
+    Einc = None
+    Enew = None
+    Eratio = None
+    topicsWithNoPublishers = db.topicsWithNoPublishers() # list of tuples with (topic, max_allowed_latency)
+    print(topicsWithNoPublishers)
+    # get all topics where publish = 0 for all capable devices
 
-        # Add assignment and update DB
-        publishers._units[mac].addAssignment(topic, latency)
-        db.updatePublishTableWithPublishingAssignments(mac, [topic])
+    # for each topic with none publishing
+    for task in topicsWithNoPublishers: 
+        topic = task[0]
+        freq = task[1]
+        #print(f"Task: {task}")
+        # get devices capable of publishing to the topic
+        capableDevices = db.devicesCapableToPublish(topicName=topic) # list of tuples with (deviceMac, battery, executions,consumption)
+        # justpicked the first device that matches the topic the subscriber subscribes to
+        # for each device
+        for device in capableDevices:
+            mac = device[0]
+            battery = device[1]
+            num_exec = device[2]
+            consumption = device[3]
+            # get device publishing info with query
+            devicePublishings = db.devicePublishing(MAC_ADDR=mac) # list of tuples with (topic, max_allowed_latency)
 
+            # create processing unit at key = mac
+            # add device info as a Processing_Unit in Devices singleton
+            if mac not in publishers._units.keys():
+                publishers.addProcessingUnit(Processing_Unit(macAddr=mac, capacity=battery, executions = num_exec, consumption=consumption))
+
+            # add publishings to the device with macAddr = mac, and set device frequencies
+            # add current device publishing info to assignments (topics that the device currently publishes to)
+
+            # if there are topics the device already publishes to
+            if devicePublishings:
+                # add them to the unit
+                publishers._units[mac].addPublishings(devicePublishings)
+                if changedTopic and topic == changedTopic:
+                    # if there was a latency change to changedTopic, then you must recalculate devices' number of executions
+                    publishers._units[mac].resetExecutions()
+            
+            Einc = publishers._units[mac].energyIncrease(freq)
+
+            # the device's new energy level after addition of the topic
+            Enew = publishers._units[mac].currentEnergy() + Einc
+            # the device's new energy level divided by its available battery
+            Eratio = Enew / publishers._units[mac]._battery
+            # if the new energy level is less than the battery, and 
+            # the new energy level's ratio to the battery is smaller than the min 
+            if not Emin:
+                bestMac = mac
+                Emin = Eratio
+                # number of keys in the assignments' dictionary is the number of topics assigned to that 
+                bestMacNumTopics = len(publishers._units[bestMac]._assignments.keys())
+            elif (Enew <= publishers._units[mac]._battery and Eratio < Emin and len(publishers._units[mac]._assignments.keys()) < bestMacNumTopics):
+                bestMac = mac
+                Emin = Eratio
+                bestMacNumTopics = len(publishers._units[bestMac]._assignments.keys())
+            
+        if bestMac != None:
+            # adding the assignment adds the task's frequency to the publishings variable
+            
+            publishers._units[bestMac].addAssignment(topic, freq)
+            # executions changed
+            publishers._units[bestMac].resetExecutions()
+
+            # previous consumption
+            print(f"device {bestMac} previous consumption = {publishers._units[bestMac]._consumption}")
+            # recall Emin = Enew / battery -> Enew = Emin * battery
+            newConsumption = Emin * publishers._units[bestMac]._battery
+            publishers._units[bestMac].updateConsumption(newConsumption)
+            print(f"device {bestMac} updated consumption = {publishers._units[bestMac]._consumption}")
+            # update DB
+            db.updateDeviceExecutions(MAC_ADDR=bestMac, NEW_EXECUTIONS=publishers._units[bestMac]._numExecutions)
+            db.updateDeviceConsumptions(MAC_ADDR=bestMac, NEW_CONSUMPTIONS=publishers._units[bestMac]._consumption)
+
+        bestMac = None
+        Emin = None
+        Einc = None
+        Enew = None
+        Eratio = None
+        bestMacNumTopics = 0
+        
+
+    # by this point, all the devices in Devices have their list of assignments
+    
+    # for each device in Devices
+        # if the assignments is not None:
+            # assignmentString = json.dumps(device._assignments)
+            # Devices.addAssignmentsToCommand(deviceMac = device._mac, taskList = assignmentString)
+    for macAddress, device in publishers._units.items():
+        if not device._assignments:
+            device._assignments = {"None":"None"}
+        assignmentString = json.dumps(device._assignments)
+        print(f"assignment string = {assignmentString}")
+        publishers.addAssignmentsToCommand(deviceMac=macAddress, taskList=assignmentString)
+        db.updatePublishTableWithPublishingAssignments(MAC_ADDR=macAddress, TOPICS=device._assignments.keys()) 
+        
     db.closeDB()
-
-    # Return the final assignment list
-    return assignments
+    publishers.resetUnits()
+    print(f"GENERATE ASSIGNMENTS FINAL COMMAND = {publishers._generated_cmd}")
+    # while the publishers' unit information is reset, the assignments are preserved in generated_cmd
+    return publishers._generated_cmd
 
 def getPublisherExecutions():
-
     db = Database()
     db.openDB()
     rows = db.getAllDeviceExecutions() # list of tuples (deviceMac, executions)

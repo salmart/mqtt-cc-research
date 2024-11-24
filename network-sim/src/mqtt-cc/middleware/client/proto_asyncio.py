@@ -179,8 +179,8 @@ class AsyncMqtt:
 
     async def main(self):
         # main execution        
-        
-        self.disconnected = self.loop.create_future()
+        #manages and tracks the outcome of the loop
+        self.disconnected = self.loop.create_future()#creates a future object tied to the event loop
         self.client = mqtt.Client()
         self.client.on_connect = self.on_connect
         self.client.on_message = self.on_message

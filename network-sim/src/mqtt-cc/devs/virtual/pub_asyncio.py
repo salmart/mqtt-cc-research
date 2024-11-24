@@ -123,125 +123,120 @@ class AsyncMqtt:
         return assignments, consumption
 
     async def main(self):
-        # main execution
+        # Main execution
         self.disconnected = self.loop.create_future()
 
+        # Initialize MQTT client and assign callbacks
         self.client = mqtt.Client()
-        self.client.on_connect = self.on_connect  # this just assigns the reference to the function
-        self.client.on_message = self.on_message  # this just assigns the reference to the function
-        self.client.on_disconnect = self.on_disconnect  # this just assigns the reference to the function
+        self.client.on_connect = self.on_connect
+        self.client.on_message = self.on_message
+        self.client.on_disconnect = self.on_disconnect
         self.got_message = None
 
+        # Start the AsyncioHelper
         aioh = AsyncioHelper(self.loop, self.client)
         self.client.connect("localhost", 1885, keepalive=1000)
         self.client.socket().setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2048)
 
         self.got_message = self.loop.create_future()
 
+        # Wait for the first publishing command
         if not utils._publishes:
-            print("We are waiting to get something to publish sala")
-            cmd = await self.got_message  # wait for command to come
-            print(f"This is the command the publisher is getting: {cmd}")
+            print("Waiting for a command to start publishing.")
 
-            if utils._IN_SIM:
-                cmd, consumption = await self.separateExecutionsAndAssignments(cmd)
-                utils.saveConsumption(energy=consumption)
+            # Wait for the command to arrive
+            cmd = await self.got_message
+            print(f"Received command: {cmd}")
 
-            # Convert the command to JSON format
+            # Parse the JSON command and extract details
             try:
-                cmd_list = json.loads(cmd)
-                print(f"Parsed cmd_list: {cmd_list}")
+                parsed_cmd = json.loads(cmd)  # Convert JSON string to a dictionary
+                topic = parsed_cmd.get("topic")  # Extract the topic
+                latency = parsed_cmd.get("latency")  # Extract the latency
+
+                # Separate into a list of items
+                cmd_list = [topic, latency]
+                print(f"Parsed command as list: {cmd_list}")
             except json.JSONDecodeError as e:
-                print(f"JSON decode error: {e}")
+                print(f"Error decoding JSON command: {e}")
+                return
+            except KeyError as e:
+                print(f"Missing expected key in command: {e}")
                 return
 
-            # Process the valid tuples
-            topics = []
-            for item in cmd_list:
-                if isinstance(item, (list, tuple)) and len(item) == 2:
-                    topic, value = item
-                    if isinstance(topic, str) and isinstance(value, (int, float)):
-                        topics.append({'topic': topic, 'value': value})
-                    else:
-                        print(f"Invalid item format in cmd_list: {item}")
-                else:
-                    print(f"Invalid item in cmd_list: {item}")
+            # Handle the parsed command and set publishing details
+            utils.setPublishing({'topics': [{"topic": topic, "value": latency}]})
 
-            cmd_dict = {'topics': topics}
-            cmd_json = json.dumps(cmd_dict)
-            print(f"cmd_json: {cmd_json}")
-
-            utils.setPublishing(json.loads(cmd_json))
-
+            # Create publishing routines
             if utils._publishes:
-                routines = [self.publish_to_topic(topic['topic'], topic['value']) for topic in utils._publishes.get('topics', [])]
+                routines = [
+                    self.publish_to_topic(topic_detail['topic'], topic_detail['value'])
+                    for topic_detail in utils._publishes.get('topics', [])
+                ]
             else:
                 routines = []
 
+            # Initialize new publishing and status update tasks
             self.got_message = self.loop.create_future()
-
             for coro in routines:
                 self.tasks.add(asyncio.create_task(coro))
 
             self.tasks.add(asyncio.create_task(self.waitForCmd()))
             self.tasks.add(asyncio.create_task(self.waitForStatus()))
 
+        # Main loop for running tasks
         while True:
             try:
-                print("running tasks")
+                print("Running tasks.")
                 done, pending = await asyncio.wait(self.tasks, return_when=asyncio.FIRST_COMPLETED)
 
+                # Process the completed task
                 result = done.pop().result()
-                print(f"{utils._deviceMac} canceling other tasks")
+                print(f"Task completed with result: {result}")
 
+                # Cancel remaining tasks
                 for unfinished_task in pending:
                     unfinished_task.cancel()
                 self.tasks = set()
 
-                if utils._IN_SIM:
-                    result, consumption = await self.separateExecutionsAndAssignments(result)
-                    utils.saveConsumption(energy=consumption)
-
-                # Convert the command result to JSON format
+                # Parse the new command
                 try:
-                    result_list = json.loads(result)
-                    print(f"Parsed result_list: {result_list}")
+                    parsed_result = json.loads(result)
+                    topic = parsed_result.get("topic")
+                    latency = parsed_result.get("latency")
+
+                    # Separate into a list
+                    result_list = [topic, latency]
+                    print(f"Parsed result as list: {result_list}")
                 except json.JSONDecodeError as e:
-                    print(f"JSON decode error: {e}")
+                    print(f"Error decoding JSON result: {e}")
+                    return
+                except KeyError as e:
+                    print(f"Missing expected key in result: {e}")
                     return
 
-                # Process the valid tuples
-                topics = []
-                for item in result_list:
-                    if isinstance(item, (list, tuple)) and len(item) == 2:
-                        topic, value = item
-                        if isinstance(topic, str) and isinstance(value, (int, float)):
-                            topics.append({'topic': topic, 'value': value})
-                        else:
-                            print(f"Invalid item format in result_list: {item}")
-                    else:
-                        print(f"Invalid item in result_list: {item}")
+                # Update publishing details
+                utils.setPublishing({'topics': [{"topic": topic, "value": latency}]})
 
-                result_dict = {'topics': topics}
-                result_json = json.dumps(result_dict)
-                print(f"result_json: {result_json}")
-
-                utils.setPublishing(json.loads(result_json))
-
+                # Reinitialize publishing routines
                 if utils._publishes:
-                    routines = [self.publish_to_topic(topic['topic'], topic['value']) for topic in utils._publishes.get('topics', [])]
+                    routines = [
+                        self.publish_to_topic(topic_detail['topic'], topic_detail['value'])
+                        for topic_detail in utils._publishes.get('topics', [])
+                    ]
                 else:
                     routines = []
 
                 for coro in routines:
                     self.tasks.add(asyncio.create_task(coro))
 
+                # Reinitialize command and status tasks
                 self.tasks.add(asyncio.create_task(self.waitForCmd()))
                 self.tasks.add(asyncio.create_task(self.waitForStatus()))
-
                 self.got_message = self.loop.create_future()
+
             except asyncio.CancelledError:
-                print("asyncio cancelled")
+                print("Task cancelled.")
 
 def run_async_publisher():
     print(f"{utils._deviceMac} Starting Publisher Context")

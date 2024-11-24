@@ -19,8 +19,9 @@ class Processing_Unit:
 
     def updateConsumption(self, energyIncrease):
         self._consumption+=energyIncrease
-
+    
     def resetMinimum(self):
+        print(f"Contents of self._freqs: {self._freqs}")
         if self._freqs:
             self._freq_min = min(self._freqs)
         else:
