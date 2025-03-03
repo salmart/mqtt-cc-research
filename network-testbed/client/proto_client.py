@@ -48,16 +48,17 @@ import status_handler
     # exp_type, deviceMac, battery, energy_per_execution, freq_range, topic publishings
     # 1         2           3           4                   5           6  -> ...
 def main():
-    utils = ProtoUtils()
-    current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    devicesFile = sys.argv[1] #/devices.csv
-    in_sim = sys.argv[2] # testbed
-    restart_window = sys.argv[3] #900
-    energy_per_execution = sys.argv[4] #0.0
-    threshold = sys.argv[5] #2
-    # devicePath sim 900 0.3 3
-    print(f"Device File = {devicesFile}")
-    print(f"Sim Value = {in_sim}")
+    if len(sys.argv)>1:
+        utils = ProtoUtils()
+        current_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        devicesFile = sys.argv[1] #/devices.csv
+        in_sim = sys.argv[2] # testbed
+        restart_window = sys.argv[3] #900
+        energy_per_execution = sys.argv[4] #0.0
+        threshold = sys.argv[5] #2
+        # devicePath sim 900 0.3 3
+        print(f"Device File = {devicesFile}")
+        print(f"Sim Value = {in_sim}")
     
     database = db.Database()
     database.openDB()
