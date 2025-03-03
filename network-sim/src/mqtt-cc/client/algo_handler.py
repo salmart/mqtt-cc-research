@@ -29,7 +29,7 @@ def generateAssignments(changedTopic = None, subLeft = None):
     Einc = None
     Enew = None
     Eratio = None
-    topicsWithNoPublishers = db.topicsWithNoPublishers() # list of tuples with (topic, max_allowed_latency)
+    topicsWithNoPublishers = db.topicsWithNoPublishers() # list of tuples with (topic, max_allowed_latency,latency requirement)
     print(topicsWithNoPublishers)
     # get all topics where publish = 0 for all capable devices
 
@@ -40,8 +40,7 @@ def generateAssignments(changedTopic = None, subLeft = None):
         #print(f"Task: {task}")
         # get devices capable of publishing to the topic
         capableDevices = db.devicesCapableToPublish(topicName=topic) # list of tuples with (deviceMac, battery, executions,consumption)
-        # justpicked the first device that matches the topic the subscriber subscribes to
-        # for each device
+        #Here we are going to get the devices/publishers info like the 
         for device in capableDevices:
             mac = device[0]
             battery = device[1]
