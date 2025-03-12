@@ -193,13 +193,14 @@ int handle__subscribe(struct mosquitto *context)
 			}
 
 			if(allowed){
-				log__printf(NULL, MOSQ_LOG_INFO,"I AM TELLING YOU THAT ALLOWED IS TRUE");
+				//log__printf(NULL, MOSQ_LOG_INFO,"I AM TELLING YOU THAT ALLOWED IS TRUE");
 				// Perform MQTT CC Functions here
 				if(has_tasks_qos(sub)){ //check if it has %tasks%*
 					get_qos_metrics(context, sub); // remove the lat qos from the sub
-					if(!topic_search(context)){
+					log__printf(NULL, MOSQ_LOG_INFO, sub); 
+					if(!topic_search(context, sub)){
 						log__printf(NULL, MOSQ_LOG_DEBUG, "\ TOPIC DOES NOT EXIST IN DATABASE. ADDING NOW SAL!!");
-						insert_into_topics_table(context);
+						insert_into_topics_table(context,sub);
 						insert_into_subscribers_table(context);
 						sleep(1); // necessary so thread can finish before context is freed in later functions
 					}
@@ -212,6 +213,13 @@ int handle__subscribe(struct mosquitto *context)
         				sleep(1);
 					}
 
+				}
+				else if(has_colon(sub)){
+				  if (!topic_search(context,sub)){
+					get_qos_metrics(context,sub);
+					insert_into_topics_table(context,sub);
+					sleep(1);
+				  }
 				}
 
 				rc2 = sub__add(context, sub, qos, subscription_identifier, subscription_options, &db.subs);

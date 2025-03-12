@@ -238,13 +238,22 @@ int handle__publish(struct mosquitto *context)
 		/* Ensure payload is always zero terminated, this is the reason for the extra byte above */
 		((uint8_t *)msg->payload)[msg->payloadlen] = 0;
 
+		
+		if(packet__read_bytes(&context->in_packet, msg->payload, msg->payloadlen)){
+			db__msg_store_free(msg);
+			return MOSQ_ERR_MALFORMED_PACKET;
+		}
 		//sala
-		if (has_tasks_qos(msg->topic))
+		if (has_colon(msg->topic))
 		{
-			get_qos_metrics(context,msg->topic);
-			if(!topic_search(context)){
+
+
+			//get_qos_metrics(context,msg->topic);
+			get_first_publish(context,msg);
+			log__printf(NULL, MOSQ_LOG_INFO, context->mqtt_cc.incoming_topic);
+			if(!topic_search(context,msg->topic)){
 				log__printf(NULL, MOSQ_LOG_DEBUG, "\ TOPIC DOES NOT EXIST IN DATABASE. ADDING NOW SAL!!");
-				insert_into_topics_table(context);
+				insert_into_topics_table(context,msg->topic);
 				insert_into_publisher_table(context);
 				sleep(1); // necessary so thread can finish before context is freed in later functions
 			}
@@ -254,11 +263,6 @@ int handle__publish(struct mosquitto *context)
 		{
 			insert_into_topics_table(context);
 
-		}
-		
-		if(packet__read_bytes(&context->in_packet, msg->payload, msg->payloadlen)){
-			db__msg_store_free(msg);
-			return MOSQ_ERR_MALFORMED_PACKET;
 		}
 	}
 

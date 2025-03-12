@@ -82,55 +82,6 @@ char *concat_strings(char *str1, char *str2) {
     return result;
 }
 
-// void *messageClient(void *arg){
-//     struct mosquitto* context = (struct mosquitto*)arg;
-//     // Command to execute
-//     const char *dir = "pwd";
-//     int check = system(dir);
-//     char *latChangeCommand = "mosquitto_pub -u internal -P mqttcci -t subs/change -m ";
-//     char *newSubCommand = "mosquitto_pub -u internal -P mqttcci -t subs/add -m ";
-//     char *finalCommand;
-//     //log__printf(NULL, MOSQ_LOG_DEBUG, "\t In messageClient, topic = : %s", context->mqtt_cc.incoming_topic);
-//     if(context->mqtt_cc.latChange){// if client being messaged from a change in max_allowed_latency
-//         printf("there was a lat change");
-//         finalCommand = concat_strings(latChangeCommand, context->mqtt_cc.incoming_topic);
-//     }
-//     else{
-//         printf("there was NO lat change");
-//         finalCommand = concat_strings(newSubCommand, context->mqtt_cc.incoming_topic);
-//     }
-//     //log__printf(NULL, MOSQ_LOG_DEBUG, "\t Final Command: %s", finalCommand);
-//     //log__printf(NULL, MOSQ_LOG_DEBUG, "\t for topic: %s", context->mqtt_cc.incoming_topic);
-//     // Execute the bash script
-//     int ret = system(finalCommand);
-
-//     // Check if script execution was successful
-//     if (ret == 0) {
-//         printf("Script executed successfully.\n");
-//     } else {
-//         printf("Failed to execute the script.\n");
-//     }
-//     // Exit the thread
-//     pthread_exit(NULL);
-
-
-//     // // Execute the command
-//     // int result = system(command);
-    
-//     //     // Check the result
-//     // if (result == -1) {
-//     //     // Failed to execute the command
-//     //     perror("Error executing the command");
-//     // } else if (result != 0) {
-//     //     // Command returned an error
-//     //     printf("Command returned non-zero exit code: %d\n", result);
-//     // }
-
-//     // Command executed successfully
-//     printf("Command executed successfully\n");
-
-// }
-
 void prepare_DB(){
 	log__printf(NULL, MOSQ_LOG_INFO, "in prepare DB");
         //sala

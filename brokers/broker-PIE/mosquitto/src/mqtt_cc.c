@@ -20,6 +20,14 @@ bool has_tasks_qos(char *sub){
     return true;
 }
 
+bool has_colon(char* sub){
+    char * colon = ":";
+    char* result = strstr(sub,colon);
+    if (result == NULL){
+        return false;
+    }
+    return true;
+}
 void printStmtResults(sqlite3_stmt *stmt){
     int rc;
     int i; 
@@ -94,6 +102,48 @@ void get_qos_metrics_helper_func(struct mosquitto *context, const char *key, con
     }
 
     free(temp);
+}
+
+void get_first_publish(struct mosquitto *context, struct mosquitto_msg_store * msg){
+    char * myptr = (char*) msg->payload;
+    cJSON *json = cJSON_Parse(myptr);
+    if (json == NULL) {
+        printf("Error parsing JSON\n");
+        return 1;
+    }
+
+    // Extract values
+    cJSON *mac_address = cJSON_GetObjectItem(json, "mac_address");
+    cJSON *temperature = cJSON_GetObjectItem(json, "temperature");
+    cJSON *humidity = cJSON_GetObjectItem(json, "humidity");
+    cJSON *voltage = cJSON_GetObjectItem(json, "voltage");
+    cJSON *capacity = cJSON_GetObjectItem(json, "capacity");
+
+    // Extract nested "accuracy"
+    cJSON *accuracy = cJSON_GetObjectItem(json, "accuracy");
+    cJSON *accuracy_plus_minus = cJSON_GetObjectItem(accuracy, "+-");
+    cJSON *accuracy_minus_plus = cJSON_GetObjectItem(accuracy, "-+");
+
+    // Extract nested "tasks"
+    cJSON *tasks = cJSON_GetObjectItem(json, "tasks");
+    cJSON *task1 = cJSON_GetObjectItem(tasks, "Task 1");
+    cJSON *task2 = cJSON_GetObjectItem(tasks, "Task 2");
+
+    context->mqtt_cc.incoming_topic = msg->topic;
+    context->mqtt_cc.incoming_max_latencies[0] = 0;
+    context->mqtt_cc.incoming_max_latencies[1] = 0;
+    context->mqtt_cc.incoming_accuracy[0] = accuracy->valuedouble;
+    context->mqtt_cc.incoming_accuracy[1] = accuracy->valuedouble;
+    context->mqtt_cc.incoming_frequencies[0]= 0;
+    context->mqtt_cc.incoming_frequencies[1]= 0;
+    strncpy(context->mqtt_cc.incoming_tasks[0], task1->valuestring,strlen(task1->valuestring));
+    strncpy(context->mqtt_cc.incoming_tasks[1], task2->valuestring, strlen(task2->valuestring));
+    context->mqtt_cc.incoming_energy[0]= voltage->valueint;
+    context->mqtt_cc.incoming_energy[1]= voltage->valueint;
+
+
+    cJSON_Delete(json);
+
 }
 
 void get_qos_metrics(struct mosquitto *context, const char *passed_insub)
@@ -183,16 +233,16 @@ void prepare_DB() {
     // Create subscribers table
     const char *create_subscribers_table = 
     "CREATE TABLE IF NOT EXISTS Subscribers ("
-    "DeviceMac TEXT PRIMARY KEY, Tasks TEXT, MinFrequency TEXT, MaxAllowedLatency TEXT, Accuracy TEXT);";
+    "DeviceMac TEXT PRIMARY KEY, Tasks TEXT, Min_Frequency TEXT, MaxAllowedLatency TEXT, Accuracy TEXT);";
     // Create devices table
     const char *create_publishers_table = 
      "CREATE TABLE IF NOT EXISTS Publishers ("
-        "DeviceMac TEXT PRIMARY KEY, Accuracy TEXT, Tasks TEXT, MaxFreq TEXT, Energy TEXT, MaxLatency TEXT);";
+        "DeviceMac TEXT PRIMARY KEY, Tasks TEXT, Max_Frequency TEXT, Max_Latency TEXT, Accuracy TEXT, Energy TEXT);";
     // Create topics table
     const char *create_topics_table = 
 "CREATE TABLE IF NOT EXISTS Topics ("
         "DeviceMac TEXT, TopicName TEXT, Publishing BOOLEAN, "
-        "PRIMARY KEY(DeviceMac, TopicName, Publishing));";
+        "PRIMARY KEY(TopicName, Publishing));";
 
     rc = sqlite3_exec(prototype_db.db, create_subscribers_table, 0, 0, &err_msg);
     if (rc != SQLITE_OK) {
@@ -227,14 +277,14 @@ void prepare_DB() {
         sqlite3_close(prototype_db.db);
         exit(1);
     }
-    const char* insert_subscribers_cmd = "INSERT INTO Subscribers (DeviceMac,Tasks,MinFrequency,MaxAllowedLatency,Accuracy) VALUES (?, ?, ?, ?, ?);";
+    const char* insert_subscribers_cmd = "INSERT INTO Subscribers (DeviceMac,Tasks,Min_Frequency,MaxAllowedLatency,Accuracy) VALUES (?, ?, ?, ?, ?);";
     rc = sqlite3_prepare_v2(prototype_db.db, insert_subscribers_cmd, -1, &prototype_db.insert_subscribers,0);
     if (rc != SQLITE_OK) {
         log__printf(NULL, MOSQ_LOG_ERR, "Failed to prepare statement 1: %s\n", sqlite3_errmsg(prototype_db.db));
         sqlite3_close(prototype_db.db);
         exit(1);
     }
-    const char* insert_into_publishers_cmd = "INSERT INTO Publishers (DeviceMac, Accuracy, Tasks, MaxFreq, Energy, MaxLatency) VALUES (?,?,?,?,?,?);";
+    const char* insert_into_publishers_cmd = "INSERT INTO Publishers (DeviceMac,Tasks, Max_Frequency, Max_Latency, Accuracy, Energy) VALUES (?,?,?,?,?,?);";
     rc = sqlite3_prepare_v2(prototype_db.db, insert_into_publishers_cmd, -1, &prototype_db.insert_into_publishers,0);
     if (rc != SQLITE_OK) {
         log__printf(NULL, MOSQ_LOG_ERR, "Failed to prepare statement 5: %s\n", sqlite3_errmsg(prototype_db.db));
@@ -245,24 +295,40 @@ void prepare_DB() {
 
 // Function to insert into the topics table
 
-bool topic_search(struct mosquitto *context){
+bool topic_search(struct mosquitto *context, char* sub){
+    log__printf(NULL, MOSQ_LOG_DEBUG, "Entering topic_search");
+    log__printf(NULL, MOSQ_LOG_DEBUG, sub);
+
+    if (prototype_db.find_whatever == NULL) {
+        log__printf(NULL, MOSQ_LOG_ERR, "Error: prototype_db.find_whatever is NULL");
+        return false;
+    }       
     int rc;
-    log__printf(NULL, MOSQ_LOG_DEBUG, "\ Checking for topic");
-
-
-    sqlite3_bind_text(prototype_db.find_whatever, 1, (const char*)context->mqtt_cc.incoming_topic, -1, SQLITE_STATIC);
-
-    rc = sqlite3_step(prototype_db.find_whatever);
-    log__printf(NULL, MOSQ_LOG_DEBUG, "\ Print successful");
-    sqlite3_finalize(prototype_db.find_whatever);
-    if(rc == SQLITE_ROW){ // 100
-        //printStmtResults(prototype_db.insert_topic);
-        //rc2 = sqlite3_reset(prototype_db.insert_topic);
-        // DO NOT RESET, since there is a row in the insert_topic statement
-        // RESET will be done in update_latency_req_max_allowed
-        return true;
+    if (!sub) {
+        log__printf(NULL, MOSQ_LOG_ERR, "Error: Topic is NULL");
+        return false;
     }
-    else{return false;}
+    
+    // Bind the topic name to the prepared statement
+    rc = sqlite3_bind_text(prototype_db.find_whatever, 1, sub, -1,SQLITE_STATIC);
+    if (rc != SQLITE_OK) {
+        log__printf(NULL, MOSQ_LOG_ERR, "Error binding topic to statement: %s", sqlite3_errmsg(prototype_db.db));
+        return false;
+    }
+    
+    // Execute the query
+    rc = sqlite3_step(prototype_db.find_whatever);
+    
+    if (rc == SQLITE_ROW) {
+        // The topic exists in the database
+        log__printf(NULL, MOSQ_LOG_DEBUG, "Topic '%s' found in database.", sub);
+        sqlite3_reset(prototype_db.find_whatever);
+        return true;
+    } else {
+        // No matching topic found
+        log__printf(NULL, MOSQ_LOG_DEBUG, "Topic '%s' NOT found in database.", sub);
+        sqlite3_reset(prototype_db.find_whatever);
+        return false;}
 }
 
 
@@ -272,26 +338,30 @@ char* create_latency_str(char *clientid, int latencyNum){
     return cJSON_Print(json);
 }
 
-void insert_into_topics_table(struct mosquitto *context){
+void insert_into_topics_table(struct mosquitto *context, char * sub){
     int rc;
-    log__printf(NULL, MOSQ_LOG_INFO, context->mqtt_cc.incoming_topic);
-    char * temp = context->mqtt_cc.incoming_topic;
-
+    log__printf(NULL, MOSQ_LOG_INFO, sub);
+    log__printf(NULL, MOSQ_LOG_INFO, "sub before insert: '%s'", sub);
     log__printf(NULL, MOSQ_LOG_INFO, "I am in insert_into_topics_table");
-    sqlite3_bind_text(prototype_db.insert_topic, 2, context->mqtt_cc.incoming_topic, -1, SQLITE_STATIC);//topic name problem sala
+    sqlite3_bind_text(prototype_db.insert_topic, 2, sub, -1, SQLITE_TRANSIENT);//topic name problem sala
+    char * temp = sub;
+
     uint8_t len = strlen(temp);
-    if (len > 0 && temp[len-1] == '/'){
-        temp[len-1] = '\0';
+    char *slash_pos = strchr(temp, '/'); // Find the first occurrence of '/'
+    if (slash_pos) {
+        *slash_pos = '\0'; // Replace '/' with null terminator to truncate the string
     }
     sqlite3_bind_text(prototype_db.insert_topic, 1,temp, -1, SQLITE_STATIC);//devicemac
-    sqlite3_bind_int(prototype_db.insert_topic, 3, 0);  // 1 for true, 0 for false
+    if(strstr(sub,"publisher")){ sqlite3_bind_int(prototype_db.insert_topic, 3, 1);  }// 1 for true, 0 for false}
+    else { sqlite3_bind_int(prototype_db.insert_topic, 3, 0);  }// 1 for true, 0 for false}
     rc = sqlite3_step(prototype_db.insert_topic);
+    sleep(1);
     if (rc != SQLITE_DONE) {
         fprintf(stderr, "Failed to insert into Topics: %s\n", sqlite3_errmsg(prototype_db.db));
         sqlite3_finalize(prototype_db.insert_topic);
         return rc;
     }
-    sqlite3_finalize(prototype_db.insert_topic);
+    sqlite3_reset(prototype_db.insert_topic);
     //hardcoded part used for only testing no longer needed
     
 }
@@ -378,10 +448,11 @@ void insert_into_publisher_table(struct mosquitto * context){
     int rc;
     //
     char * temp = context->mqtt_cc.incoming_topic;
-    uint8_t len = strlen(temp);
-    if (temp[len-1]=='/'){
-        temp[len-1]='\0';
+    char *slash_pos = strchr(temp, '/'); // Find the first occurrence of '/'
+    if (slash_pos) {
+        *slash_pos = '\0'; // Replace '/' with null terminator to truncate the string
     }
+    uint8_t len = strlen(temp);
     sqlite3_bind_text(prototype_db.insert_into_publishers, 1,temp, -1, SQLITE_STATIC);//devicemac
     cJSON * array1= cJSON_CreateArray();
     if (array1 == NULL){
@@ -395,7 +466,7 @@ void insert_into_publisher_table(struct mosquitto * context){
     }
     char *jsonString = cJSON_PrintUnformatted(array1);
     cJSON_Delete(array1);
-    sqlite3_bind_text(prototype_db.insert_into_publishers, 2, jsonString,-1,SQLITE_STATIC);  // 1 for true, 0 for false json for tasks?
+    sqlite3_bind_text(prototype_db.insert_into_publishers, 5, jsonString,-1,SQLITE_STATIC);  // 1 for true, 0 for false json for tasks?
     //adding frequencies
     cJSON * array2= cJSON_CreateArray();
     if (array2 == NULL){
@@ -410,7 +481,7 @@ void insert_into_publisher_table(struct mosquitto * context){
     char *jsonString2 = cJSON_PrintUnformatted(array2);
     cJSON_Delete(array2);
     
-    sqlite3_bind_text(prototype_db.insert_into_publishers, 3, jsonString2,-1,SQLITE_STATIC);  // 1 for true, 0 for false
+    sqlite3_bind_text(prototype_db.insert_into_publishers, 2, jsonString2,-1,SQLITE_STATIC);  // 1 for true, 0 for false
     
     
     cJSON * array3= cJSON_CreateArray();
@@ -425,9 +496,9 @@ void insert_into_publisher_table(struct mosquitto * context){
     }
     char *jsonString3 = cJSON_PrintUnformatted(array3);
     cJSON_Delete(array3);
-    sqlite3_bind_text(prototype_db.insert_into_publishers, 4, jsonString3, -1,SQLITE_STATIC);  // 1 for true, 0 for false
+    sqlite3_bind_text(prototype_db.insert_into_publishers, 3, jsonString3, -1,SQLITE_STATIC);  // 1 for true, 0 for false
 
-    cJSON * array4= cJSON_CreateArray();
+    cJSON * array4= cJSON_CreateDoubleArray();
     if (array4 == NULL){
         return NULL;
     }
@@ -439,7 +510,7 @@ void insert_into_publisher_table(struct mosquitto * context){
     }
     char *jsonString4 = cJSON_PrintUnformatted(array4);
     cJSON_Delete(array4);
-    sqlite3_bind_text(prototype_db.insert_into_publishers, 5, jsonString4, -1,SQLITE_STATIC);
+    sqlite3_bind_text(prototype_db.insert_into_publishers, 6, jsonString4, -1,SQLITE_STATIC);
 
     cJSON * array5= cJSON_CreateArray();
     if (array5 == NULL){
@@ -453,7 +524,7 @@ void insert_into_publisher_table(struct mosquitto * context){
     }
     char *jsonString5 = cJSON_PrintUnformatted(array4);
     cJSON_Delete(array5);
-    sqlite3_bind_text(prototype_db.insert_into_publishers, 6, jsonString5, -1,SQLITE_STATIC);
+    sqlite3_bind_text(prototype_db.insert_into_publishers, 4, jsonString5, -1,SQLITE_STATIC);
 
     rc = sqlite3_step(prototype_db.insert_into_publishers);
     if (rc != SQLITE_DONE) {
@@ -462,7 +533,7 @@ void insert_into_publisher_table(struct mosquitto * context){
         return ;
     }
     sqlite3_reset(prototype_db.insert_into_publishers);
-    sqlite3_finalize(prototype_db.insert_into_publishers);
+    //sqlite3_finalize(prototype_db.insert_into_publishers);
 
 
 }
