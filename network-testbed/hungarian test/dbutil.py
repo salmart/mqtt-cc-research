@@ -55,9 +55,12 @@ def filter_publishers(publishers_dict):
             for sub in subscribers_dict.values():
                 if task in sub["tasks"]:
                     # Apply filtering constraints
-                    meets_freq = task in task_data["max_freq"] and task_data["max_freq"][task] >= sub["min_freq"][task]
-                    meets_latency = task in task_data["max_latency"] and task_data["max_latency"][task] <= sub["max_latency"][task]
-                    meets_accuracy = task in task_data["accuracy"] and task_data["accuracy"][task] >= sub["accuracy"][task]
+                    meets_freq = (task in task_data["max_freq"]
+                                  and task_data["max_freq"][task] >= sub["min_freq"][task])
+                    meets_latency = (task in task_data["max_latency"]
+                                     and task_data["max_latency"][task] <= sub["max_latency"][task])
+                    meets_accuracy = (task in task_data["accuracy"]
+                                      and task_data["accuracy"][task] >= sub["accuracy"][task])
 
                     if meets_freq and meets_latency and meets_accuracy:
                         valid_tasks[task] = energy
@@ -106,44 +109,59 @@ def get_task_energy_matrix():
     sorted_tasks = sorted(sorted_tasks)  # Sort tasks to maintain consistent column order
 
     for device_mac, task_energy_map in filtered_publishers.items():
-        row_values = [task_energy_map.get(task, 9090909) for task in sorted_tasks]  # Assign inf for missing tasks
+        row_values = [task_energy_map.get(task, 9999999) for task in sorted_tasks]  # Large cost for missing tasks
         energy_matrix.append(row_values)
 
     # Convert to NumPy array
     energy_matrix = np.array(energy_matrix, dtype=np.float64)
-    i =0
-    while (i<1):
-        print("\n",filtered_publishers)
-        i+=1
-    return energy_matrix, filtered_publishers, sorted_tasks  # Returns the final matrix, mappings, and task order
+
+    return energy_matrix, filtered_publishers, sorted_tasks
 
 def rel():
+    """
+    Runs the Hungarian algorithm and returns TWO dictionaries:
+    1. final_assignments: {subscriber_mac: [(publisher_mac, task), ...]}
+    2. publisher_assignments: {publisher_mac: [task1, task2, ...]}
+    """
+    # 1. Build the energy/cost matrix
     matrix, mapping, tasks = get_task_energy_matrix()
-    sub_dict = fetch_subscribers()
+
+    # 2. Fetch subscriber data
+    subscribers_dict = fetch_subscribers()
+
+    # 3. Create reverse lookup for tasks -> subscribers
+    task_to_subs = {}
+    for sub_mac, sub_data in subscribers_dict.items():
+        for t in sub_data["tasks"]:
+            task_to_subs.setdefault(t, []).append(sub_mac)
+
+    final_assignments = {}     # subscriber -> list of (publisher, task)
+    publisher_assignments = {} # publisher -> list of tasks
+
     if matrix.size > 0:
-        listy =hung.hungarian_algorithm(matrix)
-    workers_dict={}
-    print("In here")
-    for mac_add, task in listy:
-        print(mac_add)
-        maccy=list(mapping.keys())[list[mac_add][0]]
-        tasker = tasks[listy[task][1]]
-        workers_dict[maccy] =tasker
+        # This returns a list of (row_idx, col_idx)
+        assignments = hung.hungarian_algorithm(matrix)
 
-    print(workers_dict)
-    relevantmac1 = list(mapping.keys())[list[0][0]]
-    relevanttask1= tasks[listy[0][1]]
-    relevantmac2 = list(mapping.keys())[list[1][0]]
-    relevanttask2 = tasks[listy[1][1]]
-    relevantmac3= list(mapping.keys())[list[2][0]]
-    relevanttask3= tasks [listy[2][1]]
-    relevantmac4 = list(mapping.keys())[list[3][0]]
-    relevanttask4= tasks[listy[3][1]]
-    print("\nTask Order:", tasks)
-    return relevantmac1,relevanttask1,relevantmac2,relevanttask2,relevantmac3,relevanttask3,relevantmac4,relevanttask4
+        # Publisher list for row->publisher lookups
+        publisher_list = list(mapping.keys())
+        # tasks for col->task lookups is 'tasks'
 
-if __name__ == "__main__":
-    #time.sleep(100)
-    rel()
-    
+        for (row_idx, col_idx) in assignments:
+            publisher_mac = publisher_list[row_idx]
+            assigned_task = tasks[col_idx]
 
+            # All subscribers who want assigned_task
+            subs_for_this_task = task_to_subs.get(assigned_task, [])
+
+            # For each subscriber, record (publisher, assigned_task)
+            for sub_mac in subs_for_this_task:
+                if sub_mac not in final_assignments:
+                    final_assignments[sub_mac] = []
+                final_assignments[sub_mac].append((publisher_mac, assigned_task))
+
+            # Also track publisher->task
+            if publisher_mac not in publisher_assignments:
+                publisher_assignments[publisher_mac] = []
+            publisher_assignments[publisher_mac].append(assigned_task)
+
+    return final_assignments, publisher_assignments

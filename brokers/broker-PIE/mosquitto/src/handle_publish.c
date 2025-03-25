@@ -244,26 +244,12 @@ int handle__publish(struct mosquitto *context)
 			return MOSQ_ERR_MALFORMED_PACKET;
 		}
 		//sala
-		if (has_colon(msg->topic))
-		{
-
-
-			//get_qos_metrics(context,msg->topic);
-			get_first_publish(context,msg);
-			log__printf(NULL, MOSQ_LOG_INFO, context->mqtt_cc.incoming_topic);
-			if(!topic_search(context,msg->topic)){
-				log__printf(NULL, MOSQ_LOG_DEBUG, "\ TOPIC DOES NOT EXIST IN DATABASE. ADDING NOW SAL!!");
+		if (!commandline(msg->topic) && !topic_search(context,msg->topic))
+		{		//log__printf(NULL, MOSQ_LOG_DEBUG, "\ TOPIC DOES NOT EXIST IN DATABASE. ADDING NOW SAL!!");
 				insert_into_topics_table(context,msg->topic);
-				insert_into_publisher_table(context);
-				sleep(1); // necessary so thread can finish before context is freed in later functions
-			}
-
+				// necessary so thread can finish before context is freed in later functions
 		}
-		else if (!topic_search())
-		{
-			insert_into_topics_table(context);
 
-		}
 	}
 
 	/* Check for topic access */

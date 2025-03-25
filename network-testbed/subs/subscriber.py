@@ -1,69 +1,110 @@
 import paho.mqtt.client as mqtt
-import sys # command line parameters
-import json # structure will & network latency msg
+import sys
 import time
+import uuid
+import re
 
-#SUBS_NET_LAT_TOPIC = "subs/netlat" # receive network lat from subs for some window of time
-#WILL_TOPIC = "subs/will"
+def get_device_mac():
+    """
+    Retrieves the local machine's MAC address and formats it like "AA:BB:CC:DD:EE:FF".
+    Replace with your own method if needed.
+    """
+    mac_int = uuid.getnode()  # 48-bit MAC as an integer
+    mac_str = ':'.join(re.findall('..', f'{mac_int:012x}')).upper()
+    return mac_str
 
-# The callback for when the client receives a CONNACK response from the broker.
 def on_connect(client, userdata, flags, rc):
-    #print("Connected with result code "+str(rc))
-    if(rc == 5):
-        #print("Authentication Error on Broker")
-        exit()
-    print(f"{userdata} is connected")
+    """
+    Called when the subscriber connects to the MQTT broker.
+    Subscribes to a topic that includes device_mac/subscriber plus
+    the semicolon-delimited parameters for your C parser.
+    """
+    if rc == 0:
+        print("[SUBSCRIBER] Connected successfully.")
+        device_mac = userdata["device_mac"]
 
-# The callback for when a message is published to the broker, and the backendreceives it
+        # 1. Build a topic that your C code can parse:
+        #    Example:
+        #      "AA:BB:CC:DD:EE:FF/subscriber/tasks=task1,task2;Max_Latency=10,15;Accuracy=0.9,0.8;Min_Frequency=5,10"
+        #    If you want to subscribe to EXACTLY this topic:
+        topic_for_qos = (
+            f"{device_mac}/subscriber/"
+            "tasks=Temperature,Humidity;"
+            "Max_Latency=10,15;"
+            "Accuracy=0.9,0.8;"
+            "Min_Frequency=5,10"
+        )
+
+        print(f"[SUBSCRIBER] Subscribing to topic: {topic_for_qos}")
+        client.subscribe(topic_for_qos, qos=1)
+
+        # 2. (Optional) If you prefer using a wildcard so you can catch
+        #    variations like tasks=..., tasks=taskA,taskB, etc.:
+        # wildcard_topic = f"{device_mac}/subscriber/#"
+        # print(f"[SUBSCRIBER] Subscribing to wildcard topic: {wildcard_topic}")
+        # client.subscribe(wildcard_topic, qos=1)
+
+    else:
+        print(f"[SUBSCRIBER] Connection failed with code {rc}")
+        sys.exit(1)
+
 def on_message(client, userdata, msg):
+    """
+    Called when a message is received on a subscribed topic.
+    - Prints the full topic (so you can see what the C code would parse).
+    - If the payload is "MAC_TASK", transform it to "MAC/TASK".
+    """
     topic = msg.topic
-    payload = msg.payload.decode()
-    print("===============")
-    print(userdata)
-    print(f"Topic: {topic}")
-    print(f"Message: {len(payload)}")
-    print("===============")
-    print()
+    payload = msg.payload.decode("utf-8")
 
-def subscribeToTopics(client, topicList:list):
-    for topic in topicList:
-        print(f"Subscribing to {topic}")
-        client.subscribe(topic,qos=1)
-        #print("sleeping now")
-        #time.sleep(8)
-# Executed when script is ran
+    print("\n[SUBSCRIBER] Received a message!")
+    print(f"  Topic: {topic}")
 
-# python3 subscriber.py <username> <password>
+    # 1. Show the raw payload
+    print(f"  Raw Payload: {payload}")
+
+    # 2. Example transformation from "MAC_TASK" -> "MAC/TASK"
+    if "_" in payload:
+        mac_part, task_part = payload.split("_", 1)
+        transformed = f"{mac_part}/{task_part}"
+        print(f"  Transformed Payload: {transformed}")
+    else:
+        print("  No transformation needed for payload.")
+
+    # 3. Done. Your C code is primarily interested in parsing the TOPIC, not the payload.
+    #    The topic you subscribed to includes semicolon-delimited key=value pairs (tasks=..., etc.)
+    #    so your C plugin can run `get_qos_metrics()` on `msg.topic`.
+
 def main():
-    subbed_topics = []
+    """
+    1) Get the local device's MAC address.
+    2) Create an MQTT subscriber client.
+    3) Connect to broker & subscribe to "devicemac/subscriber/..." for your QoS parse.
+    4) Transform any "MAC_TASK" payload to "MAC/TASK" for demonstration.
+    """
+    # 1) Retrieve local device MAC
+    device_mac = get_device_mac()
+    print(f"[SUBSCRIBER] Device MAC is {device_mac}")
 
-        #USERNAME = sys.argv[1]
-        #PASSWORD = sys.argv[2]
-        # topic list delimited by commas, no spaces
-    sub_name = sys.argv[1]
-    print(sub_name)
-    subbed_topics = sys.argv[2].split(",") # list of strings 
-    # create MQTT Client
+    # 2) Create MQTT client
     client = mqtt.Client()
-    # Set Paho API functions to our defined functions
+
+    # 3) Assign callbacks & store device_mac in user_data
     client.on_connect = on_connect
     client.on_message = on_message
-    # Set username and password 
-    client.username_pw_set(username=sub_name)
-    # will_data = {
-    #     "clientid":USERNAME, 
-    #     "topics": subbed_topics
-    #     }
-    #will_payload = json.dumps(will_data)
-    #client.will_set(topic=WILL_TOPIC, payload=will_payload, qos=1)
-    # Connect client to the Broker
-    client.connect("10.0.0.37", 1883, keepalive=1000)
-    client.user_data_set(sub_name)
-    subscribeToTopics(client, topicList = subbed_topics)
+    client.user_data_set({"device_mac": device_mac})
 
-    # Run cliet forever
-    while True:
-        client.loop()
+    # (Optional) Set username/password if the broker requires auth
+    # client.username_pw_set(username="YOUR_USERNAME", password="YOUR_PASSWORD")
+
+    # 4) Connect to your broker
+    broker_host = "localhost"  # Replace with your broker's IP/domain
+    broker_port = 1883
+    print(f"[SUBSCRIBER] Connecting to {broker_host}:{broker_port}...")
+    client.connect(broker_host, broker_port, keepalive=60)
+
+    # 5) Loop forever to handle incoming messages
+    client.loop_forever()
 
 if __name__ == "__main__":
     main()

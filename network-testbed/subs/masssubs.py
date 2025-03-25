@@ -39,4 +39,4 @@ def insert_mass_data(num_entries=100):
     print(f"Inserted {num_entries} rows into the Subscribers table.")
 
 if __name__ == "__main__":
-    insert_mass_data(500)  # Generate 500 random entries
+    insert_mass_data(25)  # Generate 500 random entries

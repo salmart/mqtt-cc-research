@@ -2,7 +2,7 @@ import paho.mqtt.client as mqtt
 from typing import Dict
 import psutil
 import subprocess
-import powerProcessing as pwr_reader
+#import powerProcessing as pwr_reader
 
 class PublisherUtils:
     _instance = None
@@ -15,29 +15,23 @@ class PublisherUtils:
     # on Pi, grab mac address with terminal, not programmatically
     def __init__(self) -> None:
         # Other attributes/constants
-        self._STATUS_TOPIC = "11:22:45:43:34/Temperature"#sensor/status" # where IoT device sends status
+        self._STATUS_TOPIC = "00:22:13:12/Temperature" # where IoT device sends status
         self._got_cmd = None # set to true and mqtt awaits self. to be set to False after msg is received
         self._end_round = None # 
         self._publishes = None
         self._current_executions = 0
-        self._timeWindow = 60 # 1 minute = time window where dev sends status, waits for response on command 
-        self._deviceMac = "11:22:45:43:34" # mac address of IoT device 
-        self._battery = 4.89 #watts
-        self._CMD_TOPIC = "11:22:45:43:34/publisher/tasks=Temperature,Humidity;Min_Frequency=5,10;Max_Latency=190,185;Accuracy=0.9,0.8;Energy=3.0,1.3;"#sensor/cmd/" + self._deviceMac # where IoT receives command on where to publish
-        self._IN_SIM = True
-        self._ENERGY_PER_EXECUTION = 0.5 #watts
 
     def setParameters(self,Mac_addr, start_battery, in_sim, energy_per_execution = None):
         # Set Attributes to Parameters
         #self._USERNAME = username
         #self._PASSWORD = password
         self._timeWindow = 60 # 1 minute = time window where dev sends status, waits for response on command 
-        self._deviceMac = "11:22:45:43:34" # mac address of IoT device 
-        self._battery = 4.89 #watts
-        self._CMD_TOPIC = "11:22:45:43:34/subscriber/tasks=Temperature,Humidity;Min_Frequency=5,10;Max_Latency=190,185;Accuracy=0.9,0.8;Energy=3.0,1.3;"#sensor/cmd/" + self._deviceMac # where IoT receives command on where to publish
-        self._IN_SIM = True
+        self._deviceMac = Mac_addr # mac address of IoT device 
+        self._battery = float(start_battery)
+        self._CMD_TOPIC = "s00:22:13:12/publisher/tasks=Temperature,Humidity;Min_Frequency=5,10;Max_Latency=190,185;Accuracy=24,12;Energy=3,12;"#sensor/cmd/" + self._deviceMac # where IoT receives command on where to publish
+        self._IN_SIM = in_sim
         if energy_per_execution:
-            self._ENERGY_PER_EXECUTION = 0.5 #watts
+            self._ENERGY_PER_EXECUTION = float(energy_per_execution)
         else:
             self._ENERGY_PER_EXECUTION = 0
 
@@ -59,7 +53,8 @@ class PublisherUtils:
         
     def getExperimentEnergy(self):
         #self._battery = pwr_reader.readVoltage() * pwr_reader.readCurrent() * 60 # Joules = Watt-Seconds
-        self._battery = pwr_reader.readCurrent() # Amps
+        #self._battery = pwr_reader.readCurrent() # Amps
+        self
 
     def saveNewExecutions(self, newExecutions):
         self._current_executions = float(newExecutions)

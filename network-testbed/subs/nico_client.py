@@ -2,7 +2,7 @@ import asyncio
 import socket
 import sys 
 import paho.mqtt.client as mqtt
-import pub_utils
+import pubs_nico as pub_utils
 import psutil
 import json
 from datetime import datetime
@@ -41,7 +41,7 @@ class AsyncioHelper:
     def on_socket_unregister_write(self, client, userdata, sock):
         self.loop.remove_writer(sock)
 
-    async def misc_loop(self):
+    async def misc_loop(self): #coroutine
         while self.client.loop_misc() == mqtt.MQTT_ERR_SUCCESS:
             try:
                 await asyncio.sleep(5)   
@@ -56,21 +56,21 @@ class AsyncMqtt:
     def on_connect(self, client, userdata, flags, rc):
         if(rc == 5):
             sys.exit()
-        client.subscribe(utils._CMD_TOPIC,qos=1)
+        client.subscribe("s00:22:13:12/publisher/tasks=Temperature,Humidity;Min_Frequency=5,10;Max_Latency=190,185;Accuracy=24,12;Energy=3,12;")
 
-    async def waitForCmd(self):
+    async def waitForCmd(self):#coroutine
         cmd = await self.got_message
         return cmd
 
     def on_message(self, client, userdata, msg):
         if mqtt.topic_matches_sub(msg.topic, utils._CMD_TOPIC):
-            print(f"{utils._deviceMac} received command: {msg.payload.decode()}")
+            print(f"received command: {msg.payload.decode()}")
             self.got_message.set_result(msg.payload.decode())
 
     def on_disconnect(self, client, userdata, rc):
         self.disconnected.set_result(rc)
 
-    async def waitForStatus(self):
+    async def waitForStatus(self): #coroutine
         while True:
             print("starting window")
 
@@ -90,7 +90,7 @@ class AsyncMqtt:
                 
             status_json = {
                 "time": current_time,
-                "deviceMac": utils._deviceMac,
+                #"deviceMac": utils._deviceMac,
                 "battery": utils._battery,
                 #"cpu_temperature": utils.get_cpu_temperature(),
                 "cpu_temperature": utils.get_cpu_temperature(), 
@@ -104,17 +104,17 @@ class AsyncMqtt:
 
 
             self.client.publish(topic = utils._STATUS_TOPIC, payload = status_str, qos=1)
-            print(f"{utils._deviceMac} publishing status")
+            print(f" publishing status")
 
 
-    async def publish_to_topic(self, sense_topic, freq):
+    async def publish_to_topic(self, sense_topic, freq):#coroutine
         msg = "1" * 10000
         while True:
             self.client.publish(topic = sense_topic, payload = msg, qos=1)
             await asyncio.sleep(freq)
-            print(f"{utils._deviceMac} publishing on {sense_topic}")
+            print(f" publishing on {sense_topic}")
     
-    async def separateExecutionsAndAssignments(self, command:str):
+    async def separateExecutionsAndAssignments(self, command:str): #coroutine
         # find the comma
         index = len(command) - 1
         while index >= 0:
@@ -123,7 +123,7 @@ class AsyncMqtt:
             index -= 1
         assignments = command[:index]
         executions = command[index + 1:]
-        print(f"{utils._deviceMac} assignments {assignments}")
+        print(f" assignments {assignments}")
         print(f"executing {executions} every minute")
         print("=================")
         utils.saveNewExecutions(executions)
@@ -140,7 +140,7 @@ class AsyncMqtt:
         self.got_message = None
 
         # set other necessary parameters for the client
-        self.client.username_pw_set(username=utils._deviceMac)
+        self.client.username_pw_set(username="salito")
         aioh = AsyncioHelper(self.loop, self.client)
         self.client.connect("localhost", 1883, keepalive=900)
         self.client.socket().setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 2048)
@@ -184,7 +184,7 @@ class AsyncMqtt:
                 # get the "returned" value from the done task
                 result = done.pop().result()
                 # sensing tasks return None, waitForCmd returns the command
-                print(f"{utils._deviceMac} canceling other tasks")
+                print(f" canceling other tasks")
                 # cancel other sensing tasks
 
                 for unfinished_task in pending:
@@ -214,11 +214,11 @@ class AsyncMqtt:
                 print("asyncio cancelled")
 
 def run_async_publisher():
-    print(f"{utils._deviceMac} Starting")
-    loop = asyncio.get_event_loop() #creating what allows threading happen
+    print(f"Starting")
+    loop = asyncio.get_event_loop()
     loop.run_until_complete(AsyncMqtt(loop).main())
     loop.close()
-    print(f"{utils._deviceMac} Finished")
+    print(f" Finished")
 
 if __name__ == "__main__":
     run_async_publisher()

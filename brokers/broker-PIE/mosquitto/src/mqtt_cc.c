@@ -96,12 +96,41 @@ void get_qos_metrics_helper_func(struct mosquitto *context, const char *key, con
         else if (strstr(temp, "Min_Frequency") != NULL) {
             context->mqtt_cc.incoming_frequencies[i] = atoi(value);
         }
+        else if (strstr(temp, "Energy") != NULL) {
+            context->mqtt_cc.incoming_energy[i] = atoi(value);
+        }
 
         value = strtok(NULL, ","); // Get next value
         i++; // Move to next index
     }
-
+    //sentinel value to terminate the strings.
+    if (strstr(temp, "Max_Latency") != NULL) {
+        context->mqtt_cc.incoming_max_latencies[i] = -1;
+    }
+    else if (strstr(temp, "Accuracy") != NULL) {
+        context->mqtt_cc.incoming_accuracy[i] = -1;
+    }
+    else if (strstr(temp, "Min_Frequency") != NULL) {
+        context->mqtt_cc.incoming_frequencies[i] = -1;
+    }
+    else if (strstr(temp,"Energy")!=NULL){
+        context->mqtt_cc.incoming_energy[i]=-1;
+    }
     free(temp);
+}
+
+commandline(char *topic){
+
+if (strstr("subscriber",topic) != NULL){
+    return true;
+}
+else if (strstr("publisher",topic)!=NULL){
+    return true;
+}
+else{
+    return false;
+}
+
 }
 
 void get_first_publish(struct mosquitto *context, struct mosquitto_msg_store * msg){
@@ -146,59 +175,71 @@ void get_first_publish(struct mosquitto *context, struct mosquitto_msg_store * m
 
 }
 
-void get_qos_metrics(struct mosquitto *context, const char *passed_insub)
-{
+void get_qos_metrics(struct mosquitto *context, const char *passed_insub) {
     char buffer[256];
 
     // Safe string copy
     snprintf(buffer, sizeof(buffer), "%s", passed_insub);
 
-    // Find first slash
-    char *slash = strchr(buffer, '/');
-    if (!slash) {
-        fprintf(stderr, "Error: No slash found in topic!\n");
-        return;
-    }
+    int slash_count = 0;
+    const char *second_slash = NULL;
 
-    // Allocate memory for topic substring
-    size_t len = slash - buffer + 1;
-    char* result = (char*)malloc(len + 1);
-    if (!result) {
-        fprintf(stderr, "Error: Memory allocation failed\n");
-        return;
-    }
-
-    strncpy(result, buffer, len);
-    result[len] = '\0';
-
-    // Free old incoming topic before assigning
-    if (context->mqtt_cc.incoming_topic) {
-        free(context->mqtt_cc.incoming_topic);
-    }
-    context->mqtt_cc.incoming_topic = result;
-
-    // Move remainder of string into buffer safely
-    size_t remaining_length = strlen(slash);
-    memmove(buffer, slash + 1, remaining_length);
-    buffer[remaining_length] = '\0';  
-
-    char* saveptr_for_semicolons;
-    char * pair = strtok_r(buffer, ";",&saveptr_for_semicolons);
-    while (pair !=NULL){
-        char * saveptr_for_equals;
-        char* key = strtok_r(pair, "=", &saveptr_for_equals);
-        char *value = strtok_r(NULL, "=",&saveptr_for_equals);
-        if (key && value){
-            get_qos_metrics_helper_func(context,key,value);
+    // Find the second '/'
+    for (const char *p = buffer; *p != '\0'; p++) {
+        if (*p == '/') {
+            slash_count++;
+            if (slash_count == 2) {
+                second_slash = p; // Pointer to the second '/'
+                break;
+            }
         }
-        else {
+    }
+
+    // Check if the second slash was found
+    if (second_slash != NULL) {
+        // Calculate the length of the substring before the second '/'
+        size_t len = second_slash - buffer;
+
+        // Allocate memory for the substring (+1 for null terminator)
+        char *result = (char *)malloc(len + 1);
+        if (!result) {
+            fprintf(stderr, "Error: Memory allocation failed\n");
             return;
         }
-        pair = strtok_r(NULL, ";",&saveptr_for_semicolons);
-    }
-    
-    return;
 
+        // Copy the substring before the second '/' into the allocated memory
+        strncpy(result, buffer, len);
+        result[len] = '\0'; // Null-terminate the string
+
+        // Free the previously allocated memory (if any)
+        if (context->mqtt_cc.incoming_topic) {
+            free(context->mqtt_cc.incoming_topic);
+        }
+
+        // Assign the new substring to incoming_topic
+        context->mqtt_cc.incoming_topic = result;
+
+        // Process the remainder of the string (after the second '/')
+        size_t remaining_length = strlen(second_slash + 1);
+        memmove(buffer, second_slash + 1, remaining_length + 1); // +1 to include the null terminator
+
+        // Tokenize the remainder of the string
+        char *saveptr_for_semicolons;
+        char *pair = strtok_r(buffer, ";", &saveptr_for_semicolons);
+        while (pair != NULL) {
+            char *saveptr_for_equals;
+            char *key = strtok_r(pair, "=", &saveptr_for_equals);
+            char *value = strtok_r(NULL, "=", &saveptr_for_equals);
+            if (key && value) {
+                get_qos_metrics_helper_func(context, key, value);
+            } else {
+                break; // Exit if key or value is missing
+            }
+            pair = strtok_r(NULL, ";", &saveptr_for_semicolons);
+        }
+    } else {
+        printf("Second '/' not found.\n");
+    }
 }
 
 char *concat_strings(char *str1, char *str2) {
@@ -293,8 +334,6 @@ void prepare_DB() {
     }
 }
 
-// Function to insert into the topics table
-
 bool topic_search(struct mosquitto *context, char* sub){
     log__printf(NULL, MOSQ_LOG_DEBUG, "Entering topic_search");
     log__printf(NULL, MOSQ_LOG_DEBUG, sub);
@@ -309,6 +348,9 @@ bool topic_search(struct mosquitto *context, char* sub){
         return false;
     }
     
+    sqlite3_reset(prototype_db.find_whatever);
+    sqlite3_clear_bindings(prototype_db.find_whatever);
+
     // Bind the topic name to the prepared statement
     rc = sqlite3_bind_text(prototype_db.find_whatever, 1, sub, -1,SQLITE_STATIC);
     if (rc != SQLITE_OK) {
@@ -331,8 +373,8 @@ bool topic_search(struct mosquitto *context, char* sub){
         return false;}
 }
 
-
 char* create_latency_str(char *clientid, int latencyNum){
+
     cJSON *json = cJSON_CreateObject();
     cJSON_AddNumberToObject(json, clientid, latencyNum);
     return cJSON_Print(json);
@@ -340,41 +382,53 @@ char* create_latency_str(char *clientid, int latencyNum){
 
 void insert_into_topics_table(struct mosquitto *context, char * sub){
     int rc;
-    log__printf(NULL, MOSQ_LOG_INFO, sub);
-    log__printf(NULL, MOSQ_LOG_INFO, "sub before insert: '%s'", sub);
-    log__printf(NULL, MOSQ_LOG_INFO, "I am in insert_into_topics_table");
-    sqlite3_bind_text(prototype_db.insert_topic, 2, sub, -1, SQLITE_TRANSIENT);//topic name problem sala
-    char * temp = sub;
+    sqlite3_reset(prototype_db.insert_topic);
+    sqlite3_clear_bindings(prototype_db.insert_topic);
 
-    uint8_t len = strlen(temp);
-    char *slash_pos = strchr(temp, '/'); // Find the first occurrence of '/'
+    log__printf(NULL, MOSQ_LOG_INFO, "I am in insert_into_topics_table");
+
+    // Safe copy of sub before mutation
+    char topic_copy[256];
+    strncpy(topic_copy, sub, sizeof(topic_copy));
+    topic_copy[sizeof(topic_copy) - 1] = '\0';
+
+    // Bind full topic name
+    sqlite3_bind_text(prototype_db.insert_topic, 2, sub, -1, SQLITE_TRANSIENT);
+
+    // Extract DeviceMac by truncating at '/'
+    char *slash_pos = strchr(topic_copy, '/');
     if (slash_pos) {
-        *slash_pos = '\0'; // Replace '/' with null terminator to truncate the string
+        *slash_pos = '\0';
     }
-    sqlite3_bind_text(prototype_db.insert_topic, 1,temp, -1, SQLITE_STATIC);//devicemac
-    if(strstr(sub,"publisher")){ sqlite3_bind_int(prototype_db.insert_topic, 3, 1);  }// 1 for true, 0 for false}
-    else { sqlite3_bind_int(prototype_db.insert_topic, 3, 0);  }// 1 for true, 0 for false}
+    sqlite3_bind_text(prototype_db.insert_topic, 1, topic_copy, -1, SQLITE_STATIC);
+
+    // Determine if this is a publisher
+    int is_publisher = strstr(sub, "publisher") != NULL;
+    sqlite3_bind_text(prototype_db.insert_topic, 3, is_publisher ? "1" : "0", -1, SQLITE_STATIC);
+
     rc = sqlite3_step(prototype_db.insert_topic);
-    sleep(1);
     if (rc != SQLITE_DONE) {
         fprintf(stderr, "Failed to insert into Topics: %s\n", sqlite3_errmsg(prototype_db.db));
-        sqlite3_finalize(prototype_db.insert_topic);
-        return rc;
+        sqlite3_reset(prototype_db.insert_topic);
+        return;
     }
+
     sqlite3_reset(prototype_db.insert_topic);
-    //hardcoded part used for only testing no longer needed
-    
 }
+
 
 void insert_into_subscribers_table(struct mosquitto* context){
     int rc;
     //
+    sqlite3_reset(prototype_db.insert_subscribers);
+    sqlite3_clear_bindings(prototype_db.insert_subscribers);
     char * temp = context->mqtt_cc.incoming_topic;
     uint8_t len = strlen(temp);
     if (temp[len-1]=='/'){
         temp[len-1]='\0';
     }
-    sqlite3_bind_text(prototype_db.insert_subscribers, 1,temp, -1, SQLITE_STATIC);//topic name
+    sqlite3_bind_text(prototype_db.insert_subscribers, 1,temp, -1, SQLITE_TRANSIENT);
+    //topic name
     cJSON * array1= cJSON_CreateArray();
     if (array1 == NULL){
         return NULL;
@@ -387,7 +441,8 @@ void insert_into_subscribers_table(struct mosquitto* context){
     }
     char *jsonString = cJSON_PrintUnformatted(array1);
     cJSON_Delete(array1);
-    sqlite3_bind_text(prototype_db.insert_subscribers, 2, jsonString,-1,SQLITE_STATIC);  // 1 for true, 0 for false json for tasks?
+    sqlite3_bind_text(prototype_db.insert_subscribers, 2, jsonString,-1,SQLITE_TRANSIENT);  // 1 for true, 0 for false json for tasks?
+    free(jsonString);
     //adding frequencies
     cJSON * array2= cJSON_CreateArray();
     if (array2 == NULL){
@@ -402,8 +457,8 @@ void insert_into_subscribers_table(struct mosquitto* context){
     char *jsonString2 = cJSON_PrintUnformatted(array2);
     cJSON_Delete(array2);
     
-    sqlite3_bind_text(prototype_db.insert_subscribers, 3, jsonString2,-1,SQLITE_STATIC);  // 1 for true, 0 for false
-    
+    sqlite3_bind_text(prototype_db.insert_subscribers, 3, jsonString2,-1,SQLITE_TRANSIENT);  // 1 for true, 0 for false
+    free(jsonString2);
     
     cJSON * array3= cJSON_CreateArray();
     if (array3 == NULL){
@@ -417,8 +472,8 @@ void insert_into_subscribers_table(struct mosquitto* context){
     }
     char *jsonString3 = cJSON_PrintUnformatted(array3);
     cJSON_Delete(array3);
-    sqlite3_bind_text(prototype_db.insert_subscribers, 4, jsonString3, -1,SQLITE_STATIC);  // 1 for true, 0 for false
-
+    sqlite3_bind_text(prototype_db.insert_subscribers, 4, jsonString3, -1,SQLITE_TRANSIENT);  // 1 for true, 0 for false
+    free(jsonString3);
     cJSON * array4= cJSON_CreateArray();
     if (array4 == NULL){
         return NULL;
@@ -431,7 +486,8 @@ void insert_into_subscribers_table(struct mosquitto* context){
     }
     char *jsonString4 = cJSON_PrintUnformatted(array4);
     cJSON_Delete(array4);
-    sqlite3_bind_text(prototype_db.insert_subscribers, 5, jsonString4, -1,SQLITE_STATIC);
+    sqlite3_bind_text(prototype_db.insert_subscribers, 5, jsonString4, -1,SQLITE_TRANSIENT);
+    free(jsonString4);
 
     rc = sqlite3_step(prototype_db.insert_subscribers);
     if (rc != SQLITE_DONE) {
@@ -440,7 +496,6 @@ void insert_into_subscribers_table(struct mosquitto* context){
         return ;
     }
     sqlite3_reset(prototype_db.insert_subscribers);
-    sqlite3_finalize(prototype_db.insert_subscribers);
 
 }
 
@@ -457,74 +512,72 @@ void insert_into_publisher_table(struct mosquitto * context){
     cJSON * array1= cJSON_CreateArray();
     if (array1 == NULL){
         return NULL;
-    }
-    int numthings1= 2;//sizeof(context->mqtt_cc.incoming_tasks);//sizeof(context->mqtt_cc.incoming_tasks[0]);
-    for (int i =0; i < numthings1; i++){
+    }  
 
-        cJSON_AddItemToArray(array1,cJSON_CreateNumber(context->mqtt_cc.incoming_accuracy[i]));
-
+    //Sentinel value for accuracy
+    for (int j=0; context->mqtt_cc.incoming_accuracy[j]!=-1;++j){
+        cJSON_AddItemToArray(array1,cJSON_CreateNumber(context->mqtt_cc.incoming_accuracy[j]));
     }
     char *jsonString = cJSON_PrintUnformatted(array1);
     cJSON_Delete(array1);
-    sqlite3_bind_text(prototype_db.insert_into_publishers, 5, jsonString,-1,SQLITE_STATIC);  // 1 for true, 0 for false json for tasks?
+    sqlite3_bind_text(prototype_db.insert_into_publishers, 5, jsonString,-1,SQLITE_TRANSIENT);  // 1 for true, 0 for false json for tasks?
+    free(jsonString);
     //adding frequencies
     cJSON * array2= cJSON_CreateArray();
     if (array2 == NULL){
         return NULL;
     }
-    int numthings2= 2;//sizeof(context->mqtt_cc.incoming_frequencies)/sizeof(context->mqtt_cc.incoming_frequencies[0]);
-    for (int i =0; i < numthings2; i++){
 
-        cJSON_AddItemToArray(array2,cJSON_CreateString(context->mqtt_cc.incoming_tasks[i]));
-
+    for (int i = 0; context->mqtt_cc.incoming_tasks[i][0] != '\0'; i++) {
+            cJSON_AddItemToArray(array2,cJSON_CreateString(context->mqtt_cc.incoming_tasks[i]));
     }
+    // for (int i =0; i < count1; i++){
+
+    //     cJSON_AddItemToArray(array2,cJSON_CreateString(context->mqtt_cc.incoming_tasks[i]));
+
+    // }
     char *jsonString2 = cJSON_PrintUnformatted(array2);
     cJSON_Delete(array2);
     
-    sqlite3_bind_text(prototype_db.insert_into_publishers, 2, jsonString2,-1,SQLITE_STATIC);  // 1 for true, 0 for false
-    
+    sqlite3_bind_text(prototype_db.insert_into_publishers, 2, jsonString2,-1,SQLITE_TRANSIENT);  // 1 for true, 0 for false
+    free(jsonString2);
     
     cJSON * array3= cJSON_CreateArray();
     if (array3 == NULL){
         return NULL;
     }
-    int numthings3= 2;//sizeof(context->mqtt_cc.incoming_max_latencies)/sizeof(context->mqtt_cc.incoming_max_latencies[0]);
-    for (int i =0; i < numthings3; i++){
+    for (int i =0;context->mqtt_cc.incoming_frequencies[i]!=-1; i++){
 
         cJSON_AddItemToArray(array3,cJSON_CreateNumber(context->mqtt_cc.incoming_frequencies[i]));
 
     }
     char *jsonString3 = cJSON_PrintUnformatted(array3);
     cJSON_Delete(array3);
-    sqlite3_bind_text(prototype_db.insert_into_publishers, 3, jsonString3, -1,SQLITE_STATIC);  // 1 for true, 0 for false
-
-    cJSON * array4= cJSON_CreateDoubleArray();
+    sqlite3_bind_text(prototype_db.insert_into_publishers, 3, jsonString3, -1,SQLITE_TRANSIENT);  // 1 for true, 0 for false
+    free(jsonString3);
+    cJSON * array4= cJSON_CreateArray();
     if (array4 == NULL){
         return NULL;
     }
-    int numthings4= 2;//sizeof(context->mqtt_cc.incoming_accuracy)/sizeof(context->mqtt_cc.incoming_accuracy[0]);
-    for (int i =0; i < numthings4; i++){
-
+    for (int i =0;context->mqtt_cc.incoming_energy[i]!=-1; i++){
         cJSON_AddItemToArray(array4,cJSON_CreateNumber(context->mqtt_cc.incoming_energy[i]));
-
     }
     char *jsonString4 = cJSON_PrintUnformatted(array4);
     cJSON_Delete(array4);
-    sqlite3_bind_text(prototype_db.insert_into_publishers, 6, jsonString4, -1,SQLITE_STATIC);
+    sqlite3_bind_text(prototype_db.insert_into_publishers, 6, jsonString4, -1,SQLITE_TRANSIENT);
+    free(jsonString4);
 
     cJSON * array5= cJSON_CreateArray();
     if (array5 == NULL){
         return NULL;
     }
-    int numthings5= 2;//sizeof(context->mqtt_cc.incoming_accuracy)/sizeof(context->mqtt_cc.incoming_accuracy[0]);
-    for (int i =0; i < numthings5; i++){
-
+    for (int i =0;context->mqtt_cc.incoming_max_latencies[i]!=-1; i++){
         cJSON_AddItemToArray(array5,cJSON_CreateNumber(context->mqtt_cc.incoming_max_latencies[i]));
-
     }
-    char *jsonString5 = cJSON_PrintUnformatted(array4);
+    char *jsonString5 = cJSON_PrintUnformatted(array5);
     cJSON_Delete(array5);
-    sqlite3_bind_text(prototype_db.insert_into_publishers, 4, jsonString5, -1,SQLITE_STATIC);
+    sqlite3_bind_text(prototype_db.insert_into_publishers, 4, jsonString5, -1,SQLITE_TRANSIENT);
+    free(jsonString5);
 
     rc = sqlite3_step(prototype_db.insert_into_publishers);
     if (rc != SQLITE_DONE) {

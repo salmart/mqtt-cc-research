@@ -195,33 +195,27 @@ int handle__subscribe(struct mosquitto *context)
 			if(allowed){
 				//log__printf(NULL, MOSQ_LOG_INFO,"I AM TELLING YOU THAT ALLOWED IS TRUE");
 				// Perform MQTT CC Functions here
-				if(has_tasks_qos(sub)){ //check if it has %tasks%*
-					get_qos_metrics(context, sub); // remove the lat qos from the sub
-					log__printf(NULL, MOSQ_LOG_INFO, sub); 
-					if(!topic_search(context, sub)){
+				if(has_tasks_qos(sub)){ //is it piggy back?
+					if(strstr("subscriber",sub) && !topic_search(context, sub)){
+						get_qos_metrics(context, sub); // remove the lat qos from the sub
+						log__printf(NULL, MOSQ_LOG_INFO, sub); 
 						log__printf(NULL, MOSQ_LOG_DEBUG, "\ TOPIC DOES NOT EXIST IN DATABASE. ADDING NOW SAL!!");
 						insert_into_topics_table(context,sub);
 						insert_into_subscribers_table(context);
 						sleep(1); // necessary so thread can finish before context is freed in later functions
 					}
-					else{ // since the topic already exists need to adjust max_allowed_latency
-						context->mqtt_cc.latChange = true;
-						log__printf(NULL, MOSQ_LOG_DEBUG, "\ Topic already exists in DB. Updating latency QoS: \n");
-						// void add_to_existing_topic(struct mosquitto *context); this function will call update_lat_req() and calc_new_max_latency()
-						update_lat_req_max_allowed(context);
-						// client messaged if max_allowed changed in update
-        				sleep(1);
+					else if (!topic_search(context,sub)){
+						//all of this is just to remove the s from the topic name for parsing purposes
+						get_qos_metrics(context, sub); // remove the lat qos from the sub
+						log__printf(NULL, MOSQ_LOG_INFO, sub); 
+						log__printf(NULL, MOSQ_LOG_DEBUG, "\ TOPIC DOES NOT EXIST IN DATABASE. ADDING NOW SAL!!");
+						insert_into_topics_table(context,sub);
+						insert_into_publisher_table(context);
+						sleep(1);
 					}
 
 				}
-				else if(has_colon(sub)){
-				  if (!topic_search(context,sub)){
-					get_qos_metrics(context,sub);
-					insert_into_topics_table(context,sub);
-					sleep(1);
-				  }
-				}
-
+				
 				rc2 = sub__add(context, sub, qos, subscription_identifier, subscription_options, &db.subs);
 				if(rc2 > 0){
 					mosquitto__free(sub);
