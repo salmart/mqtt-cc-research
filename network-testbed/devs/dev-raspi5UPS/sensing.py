@@ -7,24 +7,18 @@ import subprocess as call
 import json
 import uuid
 
-MQTT_BROKER = "141.215.217.6"  
+#MQTT_BROKER = "192.168.1.65"  
 MQTT_PORT = 1883
-MQTT_TOPIC = "sensor/dht11"
 last_publish_time = time.time()
 
 sensor = seeed_dht.DHT("11", 12)
 
-client = mqtt.Client()
-
-client.connect(MQTT_BROKER, MQTT_PORT, 60)
-
-def publish_sensor_data():
-    while True:
+def get_sensor_data():
         humi, temp = sensor.read()
         voltage = readVoltage(bus)
         capacity = readCapacity(bus)
-        publish_interval_seconds = current_time - last_publish_time
-        publish_frequency_hz = 1 / publish_interval_seconds
+        #publish_interval_seconds = current_time - last_publish_time
+        #publish_frequency_hz = 1 / publish_interval_seconds
         if humi is not None and temp is not None and voltage is not None and capacity is not None:
             message = {
                 "mac_address": device_mac,
@@ -32,7 +26,6 @@ def publish_sensor_data():
                 "humidity" : round (humi,1),
                 "voltage" : round(voltage, 2),
                 "capacity" : round (capacity,2),
-                "publish_frequency_hz" : round (publish_frequency_hz, 2),
                 "accuracy" : {
                     "+-": 2,
                     "-+": 5
@@ -43,11 +36,8 @@ def publish_sensor_data():
                 }
             }
             message_str = json.dumps(message)
-            client.publish(MQTT_TOPIC, message_str)
-            last_publish_time = time.time()
-            print(f"Published: {message_str}")
-        else:
-            print("Failed to read sensor data.")
+            return message_str
+            #last_publish_time = time.time()
 
         time.sleep(2)  
 
