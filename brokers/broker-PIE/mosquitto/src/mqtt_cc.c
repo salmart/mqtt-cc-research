@@ -220,7 +220,7 @@ void get_qos_metrics(struct mosquitto *context, const char *passed_insub) {
         context->mqtt_cc.incoming_topic = result;
 
         // Process the remainder of the string (after the second '/')
-        size_t remaining_length = strlen(second_slash + 1);
+            size_t remaining_length = strlen(second_slash + 1);
         memmove(buffer, second_slash + 1, remaining_length + 1); // +1 to include the null terminator
 
         // Tokenize the remainder of the string
@@ -422,10 +422,10 @@ void insert_into_subscribers_table(struct mosquitto* context){
     //
     sqlite3_reset(prototype_db.insert_subscribers);
     sqlite3_clear_bindings(prototype_db.insert_subscribers);
-    char * temp = context->mqtt_cc.incoming_topic;
-    uint8_t len = strlen(temp);
-    if (temp[len-1]=='/'){
-        temp[len-1]='\0';
+    char *temp = context->mqtt_cc.incoming_topic;
+    char *slash = strchr(temp, '/');
+    if (slash != NULL) {
+        *slash = '\0';  // Truncate at the first '/'
     }
     sqlite3_bind_text(prototype_db.insert_subscribers, 1,temp, -1, SQLITE_TRANSIENT);
     //topic name
@@ -501,6 +501,7 @@ void insert_into_subscribers_table(struct mosquitto* context){
 
 void insert_into_publisher_table(struct mosquitto * context){
     int rc;
+    sqlite3_reset(prototype_db.insert_into_publishers);
     //
     char * temp = context->mqtt_cc.incoming_topic;
     char *slash_pos = strchr(temp, '/'); // Find the first occurrence of '/'

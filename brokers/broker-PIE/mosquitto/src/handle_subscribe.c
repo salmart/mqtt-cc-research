@@ -196,7 +196,7 @@ int handle__subscribe(struct mosquitto *context)
 				//log__printf(NULL, MOSQ_LOG_INFO,"I AM TELLING YOU THAT ALLOWED IS TRUE");
 				// Perform MQTT CC Functions here
 				if(has_tasks_qos(sub)){ //is it piggy back?
-					if(strstr("subscriber",sub) && !topic_search(context, sub)){
+					if(strstr(sub,"subscriber") && !topic_search(context, sub)){
 						get_qos_metrics(context, sub); // remove the lat qos from the sub
 						log__printf(NULL, MOSQ_LOG_INFO, sub); 
 						log__printf(NULL, MOSQ_LOG_DEBUG, "\ TOPIC DOES NOT EXIST IN DATABASE. ADDING NOW SAL!!");
