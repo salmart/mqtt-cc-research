@@ -3,6 +3,7 @@ import sys
 import time
 import uuid
 import re
+import json
 
 def get_device_mac():
     """
@@ -61,6 +62,10 @@ def on_message(client, userdata, msg):
             print("[WARNING] Payload format didn't match 'MAC/TaskName'.")
     else:
         print("No slash found in payload; skipping subscription to the task name.")
+        data=json.loads(payload)
+        init_time= data.get("initialtime")
+        endtime=time.perf_counter()
+        print(f"Time it took to travel: {endtime - init_time} seconds")
 
 def main():
     device_mac = get_device_mac()
