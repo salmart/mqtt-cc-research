@@ -244,11 +244,6 @@ int handle__publish(struct mosquitto *context)
 			return MOSQ_ERR_MALFORMED_PACKET;
 		}
 		//sala
-		if (!commandline(msg->topic) && !topic_search(context,msg->topic))
-		{		//log__printf(NULL, MOSQ_LOG_DEBUG, "\ TOPIC DOES NOT EXIST IN DATABASE. ADDING NOW SAL!!");
-				insert_into_topics_table(context,msg->topic);
-				// necessary so thread can finish before context is freed in later functions
-		}
 
 	}
 

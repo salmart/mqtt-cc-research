@@ -44,34 +44,6 @@ void printStmtResults(sqlite3_stmt *stmt){
     }
 }
 
-// Need full mosquitto context to extract clientid of the subscriber that send incoming_sub
-void store_lat_qos(struct mosquitto *context, char* sub_with_lat_qos){
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "\t in store_lat_qos");
-    char *latencyStr = "%latency%";
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "\t before strstr");
-    char* result = strstr(sub_with_lat_qos, latencyStr); // result points at %latency%* in sub_with_lat_qos
-    //looks for %latency%
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "\t after strstr");
-    size_t latStr_len = strlen(result); 
-    //allocate the necessary memory for holding just the latency in context
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "\t before allcoating mem to temp_lat_qos");
-    char* temp_lat_qos = malloc(latStr_len - 7);
-    
-    strcpy(temp_lat_qos, result + 9); // ignores the %latency% substring, keeps the numbers afterward
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "\t after strcpy");
-    context->mqtt_cc.incoming_lat_qos = atoi(temp_lat_qos);
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "\t Latency QoS: %d", context->mqtt_cc.incoming_lat_qos);
-    // remove the latency qos from the subscription
-    while(*result){
-            *result = *(result + latStr_len);
-            result++;
-    }
-    // save the sub, which no longer has the latency qos attached
-    context->mqtt_cc.incoming_topic = sub_with_lat_qos; 
-    context->mqtt_cc.incoming_sub_clientid = context->id;
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "\t For Topic: %s", context->mqtt_cc.incoming_topic);
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "\t For Subscriber: %s", context->mqtt_cc.incoming_sub_clientid);
-}
 
 void get_qos_metrics_helper_func(struct mosquitto *context, const char *key, const char* val)
 {
@@ -116,22 +88,12 @@ void get_qos_metrics_helper_func(struct mosquitto *context, const char *key, con
     else if (strstr(temp,"Energy")!=NULL){
         context->mqtt_cc.incoming_energy[i]=-1;
     }
+    else if (strstr(temp,"tasks")!=NULL){
+        context->mqtt_cc.incoming_tasks[i][0]='\0';
+    }
     free(temp);
 }
 
-commandline(char *topic){
-
-if (strstr("subscriber",topic) != NULL){
-    return true;
-}
-else if (strstr("publisher",topic)!=NULL){
-    return true;
-}
-else{
-    return false;
-}
-
-}
 
 void get_first_publish(struct mosquitto *context, struct mosquitto_msg_store * msg){
     char * myptr = (char*) msg->payload;
@@ -433,8 +395,8 @@ void insert_into_subscribers_table(struct mosquitto* context){
     if (array1 == NULL){
         return NULL;
     }
-    int numthings1= 2;//sizeof(context->mqtt_cc.incoming_tasks);//sizeof(context->mqtt_cc.incoming_tasks[0]);
-    for (int i =0; i < numthings1; i++){
+   // int numthings1= 2;//sizeof(context->mqtt_cc.incoming_tasks);//sizeof(context->mqtt_cc.incoming_tasks[0]);
+    for (int i =0; context->mqtt_cc.incoming_tasks[i][0]!='\0'; i++){
 
         cJSON_AddItemToArray(array1,cJSON_CreateString(context->mqtt_cc.incoming_tasks[i]));
 
@@ -448,8 +410,8 @@ void insert_into_subscribers_table(struct mosquitto* context){
     if (array2 == NULL){
         return NULL;
     }
-    int numthings2= 2;//sizeof(context->mqtt_cc.incoming_frequencies)/sizeof(context->mqtt_cc.incoming_frequencies[0]);
-    for (int i =0; i < numthings2; i++){
+    //int numthings2= 2;//sizeof(context->mqtt_cc.incoming_frequencies)/sizeof(context->mqtt_cc.incoming_frequencies[0]);
+    for (int i =0; context->mqtt_cc.incoming_frequencies[i]!=-1; i++){
 
         cJSON_AddItemToArray(array2,cJSON_CreateNumber(context->mqtt_cc.incoming_frequencies[i]));
 
@@ -464,8 +426,8 @@ void insert_into_subscribers_table(struct mosquitto* context){
     if (array3 == NULL){
         return NULL;
     }
-    int numthings3= 2;//sizeof(context->mqtt_cc.incoming_max_latencies)/sizeof(context->mqtt_cc.incoming_max_latencies[0]);
-    for (int i =0; i < numthings3; i++){
+    //int numthings3= 2;//sizeof(context->mqtt_cc.incoming_max_latencies)/sizeof(context->mqtt_cc.incoming_max_latencies[0]);
+    for (int i =0; context->mqtt_cc.incoming_max_latencies[i]!=-1; i++){
 
         cJSON_AddItemToArray(array3,cJSON_CreateNumber(context->mqtt_cc.incoming_max_latencies[i]));
 
@@ -478,8 +440,8 @@ void insert_into_subscribers_table(struct mosquitto* context){
     if (array4 == NULL){
         return NULL;
     }
-    int numthings4= 2;//sizeof(context->mqtt_cc.incoming_accuracy)/sizeof(context->mqtt_cc.incoming_accuracy[0]);
-    for (int i =0; i < numthings4; i++){
+    //int numthings4= 2;//sizeof(context->mqtt_cc.incoming_accuracy)/sizeof(context->mqtt_cc.incoming_accuracy[0]);
+    for (int i =0; context->mqtt_cc.incoming_accuracy[i]!=-1; i++){
 
         cJSON_AddItemToArray(array4,cJSON_CreateNumber(context->mqtt_cc.incoming_accuracy[i]));
 
@@ -532,11 +494,6 @@ void insert_into_publisher_table(struct mosquitto * context){
     for (int i = 0; context->mqtt_cc.incoming_tasks[i][0] != '\0'; i++) {
             cJSON_AddItemToArray(array2,cJSON_CreateString(context->mqtt_cc.incoming_tasks[i]));
     }
-    // for (int i =0; i < count1; i++){
-
-    //     cJSON_AddItemToArray(array2,cJSON_CreateString(context->mqtt_cc.incoming_tasks[i]));
-
-    // }
     char *jsonString2 = cJSON_PrintUnformatted(array2);
     cJSON_Delete(array2);
     
@@ -587,190 +544,6 @@ void insert_into_publisher_table(struct mosquitto * context){
         return ;
     }
     sqlite3_reset(prototype_db.insert_into_publishers);
-    //sqlite3_finalize(prototype_db.insert_into_publishers);
-
-
-}
-
-void insert_topic_in_DB(struct mosquitto *context){
-    log__printf(NULL, MOSQ_LOG_INFO, "I am in insert_topic_in_DB");
-    log__printf(NULL, MOSQ_LOG_INFO, context->mqtt_cc.incoming_topic);
-    int rc;
-    int rc2; 
-    //pthread_t mess_client;
-	//pthread_attr_t mess_client_attr;
-    // create latency column value
-    char *latencyJsonString = create_latency_str(context->mqtt_cc.incoming_sub_clientid, context->mqtt_cc.incoming_lat_qos);
-    //(subscription TEXT PRIMARY KEY, latency_req TEXT, max_allowed_latency INTEGER, added INTEGER, lat_change INTEGER)
-    //bind topic and latency to prepared statement 
-    sqlite3_bind_text(prototype_db.insert_new_topic, 1, context->mqtt_cc.incoming_topic, -1, SQLITE_STATIC);
-    sqlite3_bind_text(prototype_db.insert_new_topic, 2, latencyJsonString, -1, SQLITE_STATIC);
-    sqlite3_bind_int(prototype_db.insert_new_topic, 3, context->mqtt_cc.incoming_lat_qos);
-    sqlite3_bind_int(prototype_db.insert_new_topic, 4, 1);
-    sqlite3_bind_int(prototype_db.insert_new_topic, 5, 0);
-    //execute statement
-  
-    rc = sqlite3_step(prototype_db.insert_new_topic);
-	sleep(2);
-    //check for error 
-    if (rc != SQLITE_DONE) {
-        log__printf(NULL, MOSQ_LOG_ERR, "Failed to execute statement: %s\n", sqlite3_errmsg(prototype_db.db));
-        sqlite3_close(prototype_db.db);
-        exit(1);
-    }
-
-    rc2 = sqlite3_reset(prototype_db.insert_new_topic);
-    if(rc2 != SQLITE_OK){
-        log__printf(NULL, MOSQ_LOG_ERR, "Failed to reset insert_new_topic: %s\n", sqlite3_errmsg(prototype_db.db));
-        exit(1);
-    }
-    log__printf(NULL, MOSQ_LOG_ERR, "Reset insert_new_topic\n");
-
-    
-    log__printf(NULL, MOSQ_LOG_DEBUG, "Success: Added topic, latency_req, and max_allowed_latency to DB\n");
-
-   // log__printf(NULL, MOSQ_LOG_DEBUG, "\ In has_lat_qos, topic = %s", context->mqtt_cc.incoming_topic);
-    // pthread_attr_init(&mess_client_attr);
-	// pthread_attr_setdetachstate(&mess_client_attr, PTHREAD_CREATE_DETACHED);
-	// log__printf(NULL, MOSQ_LOG_DEBUG, "\ In has_lat_qos, topic = %s", context->mqtt_cc.incoming_topic);
-	// pthread_create(&mess_client, &mess_client_attr, messageClient, (void*)context);
-	// pthread_attr_destroy(&mess_client_attr);
-}
-
-
-int calc_new_max_latency(struct cJSON *latencies){
-    int numLatencies = 0;
-    cJSON *child = latencies->child;
-    while(child != NULL){
-        numLatencies++;
-        child = child->next;
-    }
-    int *arr = (int *)malloc(numLatencies *sizeof(int));
-    
-    if (arr == NULL) {
-        printf("Memory allocation failed\n");
-        exit(1);
-    }
-
-    int i = 0;
-    cJSON_ArrayForEach(child, latencies){
-        //log__printf(NULL, MOSQ_LOG_DEBUG, "Adding latency to int array %ds\n in index %d", child->valueint, i);
-        arr[i] = child->valueint;
-        i++; 
-    }
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "Outside array for each");
-
-    int min = arr[0];
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "just set min");
-
-    for(i = 1; i < numLatencies; i++){
-        //log__printf(NULL, MOSQ_LOG_DEBUG, "entered for loop");
-
-        if(arr[i] < min){
-            //log__printf(NULL, MOSQ_LOG_DEBUG, "entered if");
-
-            min = arr[i];
-        }
-    }
-    return min;
-}
-
-
-void update_lat_req_max_allowed(struct mosquitto *context){
-    // at this point, the topic does exist in the DB, and the insert_topic stmt contains the row
-    int rc;
-    int ret;
-    pthread_t mess_client;
-	pthread_attr_t mess_client_attr;
-    // get the old latency value from column 1 (latencyReq)
-    
-    char *oldLatencyValue = sqlite3_column_text(prototype_db.insert_topic, 1);
-    int oldMaxAllowed = sqlite3_column_int(prototype_db.insert_topic, 2);
-    
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "old Latency Value: %s\n", oldLatencyValue);
-
-    // convert old latency value to json
-    cJSON *db_Value = cJSON_Parse(oldLatencyValue);
-    // error checking db_Value
-    if (db_Value == NULL) { 
-        const char *error_ptr = cJSON_GetErrorPtr(); 
-        if (error_ptr != NULL) { 
-            log__printf(NULL, MOSQ_LOG_DEBUG, "Error: %s\n", error_ptr);
-        } 
-        log__printf(NULL, MOSQ_LOG_DEBUG, "Exiting Program with db_Value == NULL \n");
-        cJSON_Delete(db_Value); 
-        exit(1); 
-    }
-    log__printf(NULL, MOSQ_LOG_DEBUG, "Adding clientid %s and latQos %d to topic %s \n", context->mqtt_cc.incoming_sub_clientid, context->mqtt_cc.incoming_lat_qos, context->mqtt_cc.incoming_topic);
-
-
-    // calculate the new max allowed latency from 
-    // context->mqtt_cc.incoming_lat_qos + the row's existing latencies
-
-    // add new item (clientid: latencyNum) to make new latency value
-    cJSON_AddNumberToObject(db_Value, context->mqtt_cc.incoming_sub_clientid, context->mqtt_cc.incoming_lat_qos);
-
-    int newMaxAllowed = calc_new_max_latency(db_Value);
-    int lat_changed = 0;
-    if (oldMaxAllowed != newMaxAllowed){
-        lat_changed = 1;
-        // if there is a change in the max_allowed_latency, notify client
-        // some time for the client to finish their operation
-        // pthread_attr_init(&mess_client_attr);
-		// pthread_attr_setdetachstate(&mess_client_attr, PTHREAD_CREATE_DETACHED);
-		// pthread_create(&mess_client, &mess_client_attr, messageClient, (void*)context);
-		// pthread_attr_destroy(&mess_client_attr);
-    }
-
-    // convert new latency value back into string
-    char *newLatencyValue = cJSON_Print(db_Value);
-    
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "new Latency Value: %s\n", newLatencyValue);
-    //log__printf(NULL, MOSQ_LOG_DEBUG, "new max allowed latency: %d\n", newMaxAllowed);
-
-    // bind topic and new latency value to update statement
-    //(subscription TEXT PRIMARY KEY, latency_req TEXT, max_allowed_latency INTEGER, added INTEGER, lat_change INTEGER)
-    sqlite3_bind_text(prototype_db.update_latency_req_max_allowed, 1, newLatencyValue, -1, SQLITE_STATIC);
-    sqlite3_bind_int(prototype_db.update_latency_req_max_allowed, 2, newMaxAllowed);
-    sqlite3_bind_text(prototype_db.update_latency_req_max_allowed, 4, context->mqtt_cc.incoming_topic, -1, SQLITE_STATIC);
-    sqlite3_bind_int(prototype_db.update_latency_req_max_allowed, 3, lat_changed);
-    
-    // step update statement    
-    rc = sqlite3_step(prototype_db.update_latency_req_max_allowed);
-    sleep(2);
-    // check if statement is DONE
-    if (rc != SQLITE_DONE) {
-        log__printf(NULL, MOSQ_LOG_ERR, "Failed to execute statement: %s\n", sqlite3_errmsg(prototype_db.db));
-        sqlite3_close(prototype_db.db);
-        exit(1);
-    }
-
-    log__printf(NULL, MOSQ_LOG_DEBUG, "Success: Added Latency Req %d to topic %s for client %s\n", context->mqtt_cc.incoming_lat_qos, context->mqtt_cc.incoming_topic, context->mqtt_cc.incoming_sub_clientid);
-
-        // reset update stmt
-
-    rc = sqlite3_reset(prototype_db.update_latency_req_max_allowed);
-    
-
-    // check if reset update stmt was good
-    if(rc != SQLITE_OK){
-        log__printf(NULL, MOSQ_LOG_ERR, "Failed to reset update statement: %s\n", sqlite3_errmsg(prototype_db.db));
-        exit(1);
-    }
-
-    //log__printf(NULL, MOSQ_LOG_ERR, "Reset update_latency_req_max_allowed \n");
-
-    // reset find stmt 
-
-    rc = sqlite3_reset(prototype_db.insert_topic);
-
-    // check if reset find stmt was good 
-    if(rc != SQLITE_OK){
-        log__printf(NULL, MOSQ_LOG_ERR, "Failed to reset find statement: %s\n", sqlite3_errmsg(prototype_db.db));
-        exit(1);
-    }
-
-    //log__printf(NULL, MOSQ_LOG_ERR, "Reset insert_topic\n");
 }
  
     

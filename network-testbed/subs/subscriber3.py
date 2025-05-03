@@ -6,10 +6,6 @@ import json
 first_timestamp = None
 
 def get_device_mac():
-    """
-    Retrieves the local machine's MAC address and formats it like "AA:BB:CC:DD:EE:FF".
-    Replace with your own method if needed.
-    """
     mac_str = "89:73:74:74"
     return mac_str
 
