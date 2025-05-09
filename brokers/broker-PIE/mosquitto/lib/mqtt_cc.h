@@ -6,10 +6,10 @@
 struct mqttcc{
     char* incoming_topic; 
     int incoming_max_latencies[10];
-    float incoming_accuracy[10];
-    int incoming_frequencies[10];
+    double incoming_accuracy[10];
+    double incoming_frequencies[10];
     char incoming_tasks[10][20];
-    int incoming_energy [10];
+    double incoming_energy [10];
     //nico below
     int incoming_lat_qos;
     char* incoming_sub_clientid;

@@ -1,86 +1,114 @@
-import paho.mqtt.client as mqtt
+import csv
+import json
+import os
 import sys
 import time
-import uuid
-import re
-import json
+from pathlib import Path
 
-def get_device_mac():
-    """
-    Retrieves the local machine's MAC address and formats it like "AA:BB:CC:DD:EE:FF".
-    Replace with your own method if needed.
-    """
-    mac_str = "89:33:44:44"
-    return mac_str
+import paho.mqtt.client as mqtt
+BROKER_HOST = "localhost"
+BROKER_PORT = 1883
+
+DEVICE_MAC = "89:33:44:44"  
+
+CONTROL_TOPIC = (
+    f"{DEVICE_MAC}/subscriber/"
+    "tasks=Motion,Humidity;"
+    "Max_Latency=290,335;"
+    "Accuracy=0.9,0.8;"
+    "Min_Frequency=5,10;"
+)
+
+# CSV output path
+CSV_PATH = Path("power_log1.csv")
+CSV_FILE = None
+CSV_WRITER = None
+SCRIPT_START = time.perf_counter()
+
+def ensure_csv():
+    """Open the CSV file (append) and write header if empty."""
+    global CSV_FILE, CSV_WRITER
+    if CSV_FILE is None:
+        CSV_FILE = CSV_PATH.open("a", newline="")
+        CSV_WRITER = csv.writer(CSV_FILE)
+        # Write header if file was empty
+        if CSV_FILE.tell() == 0:
+            CSV_WRITER.writerow(["time_seconds", "power"])
+        CSV_FILE.flush()
+
+
+def log_power(value: float):
+    """Log <elapsed time>, <power> to CSV."""
+    ensure_csv()
+    elapsed = time.perf_counter() - SCRIPT_START
+    CSV_WRITER.writerow([f"{elapsed:.4f}", f"{value:.2f}"])
+    CSV_FILE.flush()
 
 def on_connect(client, userdata, flags, rc):
-    if rc == 0:
-        print("[SUBSCRIBER] Connected successfully.")
-        device_mac = userdata["device_mac"]
-
-        # Example: "AA:BB:CC:DD:EE:FF/subscriber/tasks=Motion,Humidity;Max_Latency=...etc..."
-        topic_for_qos = (
-            f"{device_mac}/subscriber/"
-            "tasks=Motion,Humidity;"
-            "Max_Latency=290,335;"
-            "Accuracy=0.9,0.8;"
-            "Min_Frequency=5,10;"
-        )
-        print(f"[SUBSCRIBER] Subscribing to topic: {topic_for_qos}")
-        client.subscribe(topic_for_qos, qos=1)
-    else:
-        print(f"[SUBSCRIBER] Connection failed with code {rc}")
+    if rc != 0:
+        print(f"[SUB] Connection failed with code {rc}")
         sys.exit(1)
 
+    print("[SUB] Connected – subscribing to control topic…")
+    client.subscribe(CONTROL_TOPIC, qos=1)
+    print(f"[SUB] Subscribed to {CONTROL_TOPIC}")
+
+
 def on_message(client, userdata, msg):
-    """
-    Called when a message is received on a subscribed topic.
-    If the payload is something like '89:33:44:44/Temperature',
-    we extract 'Temperature' and subscribe to it directly.
+    """Handle control‑messages **and** data messages.
+
+    * Control messages look like "MAC/TaskName" → we subscribe to that topic.
+    * Data messages are JSON, we print them and log <power> to CSV.
     """
     topic = msg.topic
-    payload = msg.payload.decode("utf-8")
+    payload_raw = msg.payload.decode("utf-8")
 
-    print("\n[SUBSCRIBER] Received a message!")
-    print(f"  Topic: {topic}")
-    print(f"  Raw Payload: {payload}")
+    print("\n[SUB] Incoming:")
+    print("  Topic:", topic)
+    print("  Payload:", payload_raw)
 
-    # If the payload has a slash, assume it's MAC/TaskName
-    if "/" in payload:
-        parts = payload.split("/", 1)  # split once on the first slash
-        if len(parts) == 2:
-            mac_part, task_name = parts
-            task_name = task_name.strip()
-            
-            if task_name:
-                # Subscribe to just the task name
-                client.subscribe(task_name)
-                print(f"Just subscribed to the task name: '{task_name}'")
-            else:
-                print("[WARNING] Task name after slash is empty.")
-        else:
-            print("[WARNING] Payload format didn't match 'MAC/TaskName'.")
+    # ---------------- Control message (e.g. "AA:BB:CC/Temperature") ---------
+    if "/" in payload_raw and not payload_raw.lstrip()[0] == "{":
+        mac, task = payload_raw.split("/", 1)
+        full_topic = f"{mac}/{task}"
+        client.subscribe(full_topic, qos=1)
+        print(f"  → Subscribed to data topic '{full_topic}'")
+        return
+
+    try:
+        data = json.loads(payload_raw)
+    except json.JSONDecodeError:
+        print("  ! Payload is not valid JSON – skipping power log.")
+        return
+
+    # Extract a power‑like field (prefer 'power', then 'capacity', then 'voltage')
+    power_val = None
+    for key in ("power", "capacity", "voltage"):
+        if key in data:
+            power_val = float(data[key])
+            break
+
+    if power_val is not None:
+        log_power(power_val)
+        print(f"  → Logged power: {power_val:.2f}")
     else:
-        print("No slash found in payload; skipping subscription to the task name.")
-        data=json.loads(payload)
-        init_time= data.get("initialtime")
-        endtime=time.perf_counter()
-        print(f"Time it took to travel: {endtime - init_time} seconds")
+        print("  ! No power‑related field found – nothing logged.")
+
 
 def main():
-    device_mac = get_device_mac()
-    print(f"[SUBSCRIBER] Device MAC is {device_mac}")
-
     client = mqtt.Client()
     client.on_connect = on_connect
     client.on_message = on_message
-    client.user_data_set({"device_mac": device_mac})
 
-    broker_host = "localhost"
-    broker_port = 1883
-    print(f"[SUBSCRIBER] Connecting to {broker_host}:{broker_port}...")
-    client.connect(broker_host, broker_port, keepalive=60)
+    print(f"[SUB] Connecting to {BROKER_HOST}:{BROKER_PORT} …")
+    client.connect(BROKER_HOST, BROKER_PORT, keepalive=60)
     client.loop_forever()
 
+
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[SUB] Interrupted – closing CSV …")
+        if CSV_FILE:
+            CSV_FILE.close()

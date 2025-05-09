@@ -3,11 +3,6 @@ import json  # For JSON serialization
 import dbutil as db
 import time
 def on_connect_publisher(client, userdata, flags, rc):
-    """
-    Called when the publisher connects to the MQTT broker.
-    1) Publishes commands to the relevant subscribers based on the Hungarian assignment.
-    2) Publishes a second message over publisher_mac/publisher for each chosen publisher.
-    """
     if rc == 0:
         print("[PUBLISHER] Connected to MQTT Broker")
 
@@ -50,14 +45,10 @@ def on_connect_publisher(client, userdata, flags, rc):
         print(f"[PUBLISHER] Connection failed with code {rc}")
 
 if __name__ == "__main__":
-    # Create MQTT client
     client_pub = mqtt.Client()
 
-    # Set the on_connect callback
     client_pub.on_connect = on_connect_publisher
 
-    # Connect to the broker
     client_pub.connect("localhost", 1883, 60)
 
-    # Start the loop
     client_pub.loop_forever()

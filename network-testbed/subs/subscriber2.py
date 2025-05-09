@@ -1,85 +1,103 @@
-import paho.mqtt.client as mqtt
+import csv
+import json
 import sys
 import time
-import uuid
-import re
+from pathlib import Path
 
-def get_device_mac():
-    """
-    Retrieves the local machine's MAC address and formats it like "AA:BB:CC:DD:EE:FF".
-    Replace with your own method if needed.
-    """
-    mac_str = "99:33:44:99"
-    return mac_str
+import paho.mqtt.client as mqtt
+BROKER_HOST = "localhost"
+BROKER_PORT = 1883
+
+DEVICE_MAC = "55:67:44:99"
+
+CONTROL_TOPIC = (
+    f"{DEVICE_MAC}/subscriber/"
+    "tasks=Temperature,ThermalCamera;"
+    "Max_Latency=240,300;Accuracy=88,98;Min_Frequency=5,.11;"
+)
+
+CSV_PATH = Path("power_log2.csv")
+
+CSV_FILE = None
+CSV_WRITER = None
+START_TIME = time.perf_counter()
+
+def ensure_csv():
+    global CSV_FILE, CSV_WRITER
+    if CSV_FILE is None:
+        CSV_FILE = CSV_PATH.open("a", newline="")
+        CSV_WRITER = csv.writer(CSV_FILE)
+        if CSV_FILE.tell() == 0:
+            CSV_WRITER.writerow(["time_seconds", "power"])
+        CSV_FILE.flush()
+
+
+def log_row(power_val: float):
+    ensure_csv()
+    elapsed = time.perf_counter() - START_TIME
+    CSV_WRITER.writerow([f"{elapsed:.4f}", f"{power_val:.2f}"])
+    CSV_FILE.flush()
 
 def on_connect(client, userdata, flags, rc):
-    """
-    Called when the subscriber connects to the MQTT broker.
-    Subscribes to a topic that includes device_mac/subscriber plus
-    the semicolon-delimited parameters for your C parser.
-    """
-    if rc == 0:
-        print("[SUBSCRIBER] Connected successfully.")
-        device_mac = userdata["device_mac"]
-
-        topic_for_qos = f"{device_mac}/subscriber/tasks=Temperature;Max_Latency=900;Accuracy=4;Min_Frequency=5;"
-        print(f"[SUBSCRIBER] Subscribing to topic: {topic_for_qos}")
-        client.subscribe(topic_for_qos)
-    else:
-        print(f"[SUBSCRIBER] Connection failed with code {rc}")
+    if rc != 0:
+        print(f"[SUB] Connection failed: {rc}")
         sys.exit(1)
+    print("[SUB] Connected – subscribing to control topic…")
+    client.subscribe(CONTROL_TOPIC, qos=1)
+    print(f"[SUB] Subscribed to {CONTROL_TOPIC}")
+
 
 def on_message(client, userdata, msg):
-    """
-    Called when a message is received on a subscribed topic.
-    If the payload looks like 'MAC/TaskName', we subscribe to just 'TaskName'.
-    """
     topic = msg.topic
-    payload = msg.payload.decode("utf-8")
+    payload_raw = msg.payload.decode("utf-8")
 
-    print("\n[SUBSCRIBER] Received a message!")
-    print(f"  Topic: {topic}")
-    print(f"  Raw Payload: {payload}")
+    print("\n[SUB] Incoming:")
+    print("  Topic:", topic)
+    print("  Payload:", payload_raw)
 
-    # Check for MAC/TaskName format
-    if "/" in payload:
-        parts = payload.split("/", 1)  # split once on the first slash
-        if len(parts) == 2:
-            mac_part, task_name = parts
-            task_name = task_name.strip()
-            if task_name:
-                # Subscribe only to the task name
-                client.subscribe(task_name)
-                print(f"Just subscribed to the task name: '{task_name}'")
-            else:
-                print("[WARNING] Task name after slash is empty.")
-        else:
-            print("[WARNING] Payload format didn't match 'MAC/TaskName'.")
+    # Control message MAC/TaskName → subscribe
+    if "/" in payload_raw and not payload_raw.lstrip().startswith("{"):
+        mac, task = payload_raw.split("/", 1)
+        full_topic = f"{mac}/{task}"
+        client.subscribe(full_topic, qos=1)
+        print(f"  → Subscribed to '{full_topic}'")
+        return
+
+    # Data message JSON -> parse
+    try:
+        data = json.loads(payload_raw)
+    except json.JSONDecodeError:
+        print("  ! Not JSON – skip logging")
+        return
+
+    power_val = None
+    for key in ("power", "capacity", "voltage"):
+        if key in data:
+            power_val = float(data[key])
+            break
+
+    if power_val is not None:
+        log_row(power_val)
+        print(f"  → Logged power {power_val:.2f}")
     else:
-        print("No slash found in payload; skipping subscription to the task name.")
+        print("  ! No power field found")
 
 def main():
-    """
-    1) Get the local device MAC address.
-    2) Create an MQTT subscriber client.
-    3) Connect to broker & subscribe to "devicemac/subscriber/..." for your QoS parse.
-    4) If the payload is 'MAC/TaskName', subscribe to just 'TaskName'.
-    """
-    device_mac = get_device_mac()
-    print(f"[SUBSCRIBER] Device MAC is {device_mac}")
-
     client = mqtt.Client()
     client.on_connect = on_connect
     client.on_message = on_message
-    client.user_data_set({"device_mac": device_mac})
 
-    broker_host = "localhost"
-    broker_port = 1883
-    print(f"[SUBSCRIBER] Connecting to {broker_host}:{broker_port}...")
-    client.connect(broker_host, broker_port, keepalive=60)
+    print(f"[SUB] Connecting to {BROKER_HOST}:{BROKER_PORT} …")
+    client.connect(BROKER_HOST, BROKER_PORT, 60)
+    try:
+        client.loop_forever()
+    finally:
+        if CSV_FILE:
+            CSV_FILE.close()
 
-    # Loop forever to handle incoming messages
-    client.loop_forever()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[SUB] Interrupted")

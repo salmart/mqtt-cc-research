@@ -60,16 +60,16 @@ void get_qos_metrics_helper_func(struct mosquitto *context, const char *key, con
             strcpy(context->mqtt_cc.incoming_tasks[i], value);
         }
         else if (strstr(temp, "Max_Latency") != NULL) {
-            context->mqtt_cc.incoming_max_latencies[i] = atof(value);
+            context->mqtt_cc.incoming_max_latencies[i] = atoi(value);
         }
         else if (strstr(temp, "Accuracy") != NULL) {
             context->mqtt_cc.incoming_accuracy[i] = atof(value);
         }
         else if (strstr(temp, "Min_Frequency") != NULL) {
-            context->mqtt_cc.incoming_frequencies[i] = atoi(value);
+            context->mqtt_cc.incoming_frequencies[i] = atof(value);
         }
         else if (strstr(temp, "Energy") != NULL) {
-            context->mqtt_cc.incoming_energy[i] = atoi(value);
+            context->mqtt_cc.incoming_energy[i] = atof(value);
         }
 
         value = strtok(NULL, ","); // Get next value
