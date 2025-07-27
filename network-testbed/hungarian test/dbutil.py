@@ -1,6 +1,6 @@
 import sqlite3
 import numpy as np
-import bruteforce
+import hungarian_task_assignment as hung
 import ast  
 import time
 
@@ -174,7 +174,7 @@ def rel():
     if matrix.size == 0:
         return final_assignments, publisher_assignments
 
-    assignments = bruteforce.bruteforce(matrix)
+    assignments = hung.hungarian_algorithm(matrix)
     publisher_list = list(filtered_publishers.keys())
 
     for row_idx, col_idx in assignments:
